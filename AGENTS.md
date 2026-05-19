@@ -37,6 +37,7 @@ When the user asks for a dashboard, deliver these. Anything beyond is bonus.
 5. **Stock-out is normal.** `POST /payment/buy-modems-with-crypto-balance` returning a stock error (`409`) means we have no inventory in that country/carrier right now. Surface this clearly to the reseller; don't retry-loop.
 6. **Idempotency** — POSTs that create resources accept an optional `Idempotency-Key` header. Use a UUID per buy action; safe-retry will dedupe.
 7. **Don't reinvent the auto-swap logic.** The backend does it. You receive `modem.replaced` events with `{old_modem_id, new_modem_id, new_modem: {...full creds}}`. Update your local mapping atomically and ack 200. That's it.
+8. **For rotations that must succeed-or-fail-honestly, use `?sync=true`.** The default `POST /modems/{id}/restart` and `/modems/rotate-modem-by-token/{token}` return `200` *the instant the request is queued*, **before** the actual rotation completes. Silent failures (stuck worker, sticky carrier IP, daemon error) leave the client with a 200 + unchanged IP. Appending `?sync=true` blocks for up to 25 s and returns the real outcome: `200` with `new_ip` on success, `502 rotation_failed` on confirmed failure, or `503 rotation_timeout`. Use `?sync=true` for any rotation whose result your code branches on. Use the async default only for fire-and-forget timers where the next traffic through the proxy is your verification.
 
 ## Architecture you should produce
 

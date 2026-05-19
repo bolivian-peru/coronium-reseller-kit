@@ -111,8 +111,24 @@ export const coronium = {
     proxies: {
         list: () => call<{ data: Proxy[] }>('/account/proxies'),
         health: () => call<HealthResponse>('/account/proxies/health'),
-        rotate: (id: string) =>
-            call<any>(`/modems/${id}/restart`, { method: 'POST' }),
+        /**
+         * Rotate a modem's IP. Defaults to ?sync=true so the response tells
+         * you the truth: 200 = rotated (new_ip in body), 502 = confirmed
+         * failure, 503 = worker timeout. Pass {sync: false} for the
+         * fire-and-forget legacy behaviour (200 returns instantly on enqueue,
+         * does NOT mean the IP changed — your code must verify separately).
+         *
+         * For automation that branches on rotation success (account-creation
+         * bots, anti-detect frameworks, quota-driven loops), keep the default.
+         */
+        rotate: (id: string, opts?: { sync?: boolean }) => {
+            const sync = opts?.sync !== false;  // default true
+            const qs = sync ? '?sync=true' : '';
+            return call<{result: string; ext_ip?: string; new_ip?: string; code?: string; error?: string}>(
+                `/modems/${id}/restart${qs}`,
+                { method: 'POST' }
+            );
+        },
         replace: (id: string) =>
             call<any>(`/modems/${id}/replace`, { method: 'POST' }),
         // setRotationInterval, setMetadata, etc. — add if needed

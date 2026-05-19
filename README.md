@@ -53,8 +53,9 @@ test proxy at the end.
 | `GET /api/v3/account/proxies/health` | Per-proxy `is_alive` + `recommendation` |
 | `GET /api/v3/tariffs/available` | In-stock tariffs (filtered by country/carrier) |
 | `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id` |
-| `POST /api/v3/modems/{id}/restart` | Rotate IP |
+| `POST /api/v3/modems/{id}/restart` | Rotate IP (async by default; append `?sync=true` to block up to 25 s and return the real outcome with `new_ip`) |
 | `POST /api/v3/modems/{id}/replace` | Swap broken proxy (same country, transferred subscription time) |
+| `GET /api/v3/modems/rotate-modem-by-token/{token}` | Token-auth rotation for end-customer scripts. Same `?sync=true` flag. |
 | `PUT /api/v3/account/webhook` | Register HTTPS webhook for auto-swap events |
 | `GET /api/v3/account/webhook` | Read current webhook URL |
 

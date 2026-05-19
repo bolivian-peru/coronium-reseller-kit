@@ -18,7 +18,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 - `GET https://api.coronium.io/api/v3/account/proxies` — list owned proxies
 - `GET https://api.coronium.io/api/v3/account/proxies/health` — per-proxy liveness
 - `POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance` — buy proxies
-- `POST https://api.coronium.io/api/v3/modems/{id}/restart` — rotate IP
+- `POST https://api.coronium.io/api/v3/modems/{id}/restart` — rotate IP. Append `?sync=true` to block ≤25 s and return real outcome (`200` with `new_ip`, `502 rotation_failed`, or `503 rotation_timeout`) instead of fire-and-forget 200.
 - `POST https://api.coronium.io/api/v3/modems/{id}/replace` — swap broken proxy
 - `PUT https://api.coronium.io/api/v3/account/webhook` — register webhook URL
 
