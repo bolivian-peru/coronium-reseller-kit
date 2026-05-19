@@ -1,30 +1,21 @@
 # Coronium Reseller Kit
 
-> Build your mobile-proxy reseller business with Claude Code in 30 minutes.
+> Open-source starter for building a mobile-proxy reseller business on top of the [Coronium](https://dashboard.coronium.io) API. Optimized for AI coding agents (Claude Code, Cursor, Windsurf, Aider) to scaffold a working dashboard in one prompt.
 
-This repo is the **starting point** for anyone reselling Coronium mobile 4G/5G proxies to their own end customers. It contains:
+## For AI agents
 
-- A working **Next.js dashboard** example you can deploy as-is (`examples/nextjs-dashboard`)
-- A standalone **webhook receiver** showing the auto-swap + end-customer-mapping pattern (`examples/webhook-receiver`)
-- AI-agent-readable docs (`AGENTS.md`, `llms.txt`) so Claude Code / Cursor / Windsurf can scaffold a custom dashboard for you in one prompt
-- The exact paste-into-Claude-Code prompt (`PROMPT.md`)
+If you're an AI agent scaffolding a reseller dashboard, **read these first** in this order:
 
-## Quickstart (30 seconds)
+1. [`AGENTS.md`](./AGENTS.md) — hard rules, architecture template, failure-mode table
+2. [`llms.txt`](./llms.txt) — concise machine-readable surface
+3. [`PROMPT.md`](./PROMPT.md) — paste-ready prompts (Next.js / CLI / webhook-only / Telegram-bot variants)
+4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) — working foundation, copy and modify
+5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) — the auto-swap event flow
 
-1. **Get your Coronium API key** — sign up at <https://dashboard.coronium.io>, top up, then `Settings → API`.
-2. **Paste this into Claude Code** (or Cursor, or Windsurf):
+Authoritative API reference: <https://github.com/bolivian-peru/coronium-new-app/blob/main/CORONIUM_RESELLER_API.md>
+Interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (basic-auth gated; user/pass from your account)
 
-   ```
-   Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
-   and then scaffold me a Next.js reseller dashboard for Coronium mobile proxies,
-   using the example in examples/nextjs-dashboard as the foundation. My
-   CORONIUM_API_KEY is in .env. I want: a customer list, ability to buy proxies
-   on customers' behalf, and a webhook handler that auto-swaps dead modems.
-   ```
-
-3. **Done.** AI scaffolds the dashboard against the real API, you push to Vercel, you have a reseller business.
-
-## Or, manually
+## For humans
 
 ```bash
 git clone https://github.com/bolivian-peru/coronium-reseller-kit
@@ -34,22 +25,46 @@ npm install && npm run dev
 open http://localhost:3000
 ```
 
-## What the API gives you
+Or paste this into Claude Code / Cursor / Windsurf:
 
-| Endpoint | Purpose |
+```
+Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
+and scaffold me a Next.js reseller dashboard using examples/nextjs-dashboard
+as the foundation. My CORONIUM_API_KEY is in .env. Verify by buying one
+test proxy at the end.
+```
+
+## What this kit gives you
+
+| Surface | Purpose |
+|---|---|
+| `examples/nextjs-dashboard/` | Working Next.js 14 App Router dashboard — customer CRUD, proxy inventory, buy flow, webhook handler, ~1,400 LOC TypeScript |
+| `examples/webhook-receiver/` | Standalone Node + Express receiver — for resellers who already have a backend |
+| `docs/reseller-quickstart.md` | Zero → revenue path, 7 steps |
+| `docs/webhook-integration.md` | Auto-swap event flow contract |
+| `docs/metadata-strategy.md` | Customer mapping via the `metadata` field (no sidecar DB) |
+| `docs/pricing-markup.md` | 2026 market rates + economics |
+
+## Coronium API surface used
+
+| Method · Path | Purpose |
 |---|---|
 | `GET /api/v3/account/proxies` | List proxies you own |
-| `GET /api/v3/account/proxies/health` | Per-proxy liveness — skip dead ones before customers hit them |
-| `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies (charged to your prepaid USD balance) |
-| `POST /api/v3/modems/{id}/restart` | Rotate IP on a proxy |
-| `POST /api/v3/modems/{id}/replace` | Swap a broken proxy for a fresh one (same country, transferred subscription time) |
+| `GET /api/v3/account/proxies/health` | Per-proxy `is_alive` + `recommendation` |
+| `GET /api/v3/tariffs/available` | In-stock tariffs (filtered by country/carrier) |
+| `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id` |
+| `POST /api/v3/modems/{id}/restart` | Rotate IP |
+| `POST /api/v3/modems/{id}/replace` | Swap broken proxy (same country, transferred subscription time) |
 | `PUT /api/v3/account/webhook` | Register HTTPS webhook for auto-swap events |
+| `GET /api/v3/account/webhook` | Read current webhook URL |
 
-Full API: <https://dashboard.coronium.io/api-docs/> · Reseller spec: <https://github.com/bolivian-peru/coronium-new-app/blob/main/CORONIUM_RESELLER_API.md>
+Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Settings → API.
 
-## The `metadata` field — your customer-mapping layer
+## Core integration pattern (read this once)
 
-Every modem has a freeform `metadata` JSON field you control. Use it to map our `modem_id` to your end-customer in your own DB, without needing a sidecar:
+### 1. The `metadata` field is your customer-mapping layer
+
+Don't create a sidecar `proxies` table mapping your customer-ids to Coronium modem-ids — it drifts. Use the freeform `metadata` JSON field on every Modem:
 
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
@@ -60,32 +75,46 @@ POST /api/v3/payment/buy-modems-with-crypto-balance
 }
 ```
 
-Then `GET /account/proxies` returns the same `metadata` on every proxy. You never need a separate database to track who owns what. See `docs/metadata-strategy.md`.
+Every `GET /account/proxies` returns the same `metadata` verbatim. Filter client-side by `customer_id`. Full pattern in [`docs/metadata-strategy.md`](./docs/metadata-strategy.md).
 
-## Auto-swap on hardware failure
+### 2. Auto-swap is push, not pull
 
-When a modem you've sold to a customer dies, our backend auto-swaps it to a fresh same-country replacement (with transferred subscription time) and POSTs to your webhook URL:
+When a customer's modem dies, Coronium auto-provisions a same-country replacement, transfers the remaining paid time, and POSTs your webhook URL:
 
 ```json
 {
   "event": "modem.replaced",
   "old_modem_id": "...",
   "new_modem_id": "...",
-  "new_modem": { "host": "...", "http_port": "...", "proxy_login": "...", "proxy_password": "...", ... },
-  "ts": 1779192208000
+  "new_modem": {
+    "host": "...", "http_port": "...", "socks_port": "...",
+    "proxy_login": "...", "proxy_password": "...",
+    "tariff_expired_at": ..., "country_code": "...", "isOnline": true
+  },
+  "ts": ...
 }
 ```
 
-Your code updates its mapping and your customer never sees the outage. See `docs/webhook-integration.md` and `examples/webhook-receiver`.
+If no replacement is available, you get `modem.dead` with `new_modem_id: null` and a `reason` code. Full event spec in [`docs/webhook-integration.md`](./docs/webhook-integration.md).
 
-## Pricing markup
+### 3. Customer-protection is enforced server-side
 
-The wholesale price is what you pay Coronium. Retail markup is yours — we recommend 1.5× – 3× depending on geo and your support quality. See `docs/pricing-markup.md`.
+You cannot accidentally overwrite, release, or quarantine a customer's active modem via the reseller API. The backend filters protected modems out of every destructive operation (replace, auto-setup, release-by-token, etc.). Build accordingly — you don't need extra guards in your dashboard.
+
+## Hard rules (also in AGENTS.md, repeated here for human readers)
+
+1. **Never put `CORONIUM_API_KEY` in client-side code.** Server-side only. The examples enforce this; respect it in your own code.
+2. **Use HTTPS for your webhook URL.** HTTP returns 400.
+3. **Ack the webhook 200 within 5 seconds.** Process async. We don't retry; missed events fall back to email notification.
+4. **Idempotency**: pass an `Idempotency-Key` header on buy requests. Safe-retry within 24h.
+5. **Don't reinvent auto-swap or health logic.** Both are server-side, battle-tested.
 
 ## License
 
-MIT — fork it, change it, ship it. Attribution appreciated.
+MIT. Fork it, change it, ship it.
 
-## Issues / contact
+## Contact
 
-GitHub issues for code questions. For API access, partner deals, or anything that needs a human: <hello@coronium.io>.
+- Code questions: GitHub Issues on this repo
+- API access / partner deals / volume pricing: <hello@coronium.io>
+- Coronium status / changelog: <https://dashboard.coronium.io>

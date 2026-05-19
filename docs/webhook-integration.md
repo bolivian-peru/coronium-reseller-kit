@@ -45,7 +45,7 @@ Disable later with `{"webhook_url": null}`.
   "new_modem": {
     "_id": "6a1cf4d2942c49e02b1234ab",
     "name": "cor_US_NJ_x83",
-    "IMEI": "071735191220045",
+    "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
     "country_code": "US",
     "carrier_id": "6519b2095df31c2dd53fa0ad",
     "host": "172.56.171.4",
