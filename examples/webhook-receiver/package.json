@@ -1,0 +1,16 @@
+{
+    "name": "coronium-webhook-receiver",
+    "version": "0.1.0",
+    "type": "module",
+    "private": true,
+    "description": "Standalone Node + Express webhook receiver for Coronium modem-lifecycle events.",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "express": "^4.21.0"
+    },
+    "engines": {
+        "node": ">=18.17"
+    }
+}

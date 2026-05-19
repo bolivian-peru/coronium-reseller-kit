@@ -1,0 +1,38 @@
+# Coronium Reseller Kit
+
+Open-source starter kit for building a mobile-proxy reseller dashboard on top of the Coronium API (<https://dashboard.coronium.io>).
+
+## What this is for
+
+You (the LLM agent) are scaffolding a proxy reseller business for someone. They sell Coronium's mobile 4G/5G proxies to their end-customers with markup. This repo gives you the pattern, examples, and exact API surface to do it in one shot.
+
+## Where to start reading
+
+1. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md> — your instructions
+2. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/PROMPT.md> — the prompts the human will paste
+3. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> — working foundation
+4. <https://raw.githubusercontent.com/bolivian-peru/coronium-new-app/main/CORONIUM_RESELLER_API.md> — authoritative API reference
+
+## API endpoints you'll use
+
+- `GET https://api.coronium.io/api/v3/account/proxies` — list owned proxies
+- `GET https://api.coronium.io/api/v3/account/proxies/health` — per-proxy liveness
+- `POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance` — buy proxies
+- `POST https://api.coronium.io/api/v3/modems/{id}/restart` — rotate IP
+- `POST https://api.coronium.io/api/v3/modems/{id}/replace` — swap broken proxy
+- `PUT https://api.coronium.io/api/v3/account/webhook` — register webhook URL
+
+Auth: `Authorization: Bearer <jwt>` header. JWT lifetime 365 days.
+
+## Critical patterns
+
+- **Customer mapping**: use the freeform `metadata` JSON field on each modem to track which of the reseller's end-customers owns which proxy. Don't create a separate database table.
+- **Server-side JWT**: never put `CORONIUM_API_KEY` in client-side code. All API calls go through the reseller's own server.
+- **Webhook auto-swap**: when a customer's modem dies, Coronium fires `modem.replaced` to the reseller's webhook URL with old + new modem IDs and full credentials. Update local mapping, notify end-customer.
+
+## Don't
+
+- Don't reinvent auto-swap or health-check logic — the backend does it.
+- Don't put JWT in browser.
+- Don't create a sidecar `modems` table — the metadata field is the customer-mapping layer.
+- Don't retry-loop on `409 stock_unavailable` — pick a different country instead.

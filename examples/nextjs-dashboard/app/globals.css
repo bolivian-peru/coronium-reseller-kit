@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+
+* {
+    border-color: rgb(39 39 42);
+}
+
+button, input, select, textarea {
+    @apply outline-none focus:ring-2 focus:ring-emerald-500/40;
+}
+
+.btn {
+    @apply px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium transition;
+}
+.btn-ghost {
+    @apply px-3 py-1.5 rounded-md bg-transparent hover:bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm font-medium transition;
+}
+.btn-danger {
+    @apply px-3 py-1.5 rounded-md bg-red-700/80 hover:bg-red-600 text-white text-sm font-medium transition;
+}
+
+.input {
+    @apply px-3 py-1.5 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-100 text-sm w-full;
+}
+
+.card {
+    @apply bg-zinc-900 border border-zinc-800 rounded-lg p-5;
+}
+.kpi { @apply card; }
+.kpi-label { @apply text-xs uppercase tracking-wide text-zinc-400 mb-1; }
+.kpi-value { @apply text-2xl font-semibold; }
+
+.badge {
+    @apply inline-block px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide;
+}
+.badge-success { @apply bg-emerald-900/60 text-emerald-300; }
+.badge-warn { @apply bg-amber-900/60 text-amber-300; }
+.badge-danger { @apply bg-red-900/60 text-red-300; }
+.badge-muted { @apply bg-zinc-800 text-zinc-400; }
