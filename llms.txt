@@ -11,7 +11,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 1. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md> — your instructions
 2. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/PROMPT.md> — the prompts the human will paste
 3. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> — working foundation
-4. <https://raw.githubusercontent.com/bolivian-peru/coronium-new-app/main/CORONIUM_RESELLER_API.md> — authoritative API reference
+4. <https://dashboard.coronium.io/api-docs/> — authoritative interactive API reference (OpenAPI / Swagger UI, public)
 
 ## API endpoints you'll use
 

@@ -14,8 +14,7 @@ You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G
 2. `examples/nextjs-dashboard/` — copy-paste foundation
 3. `docs/webhook-integration.md` — the auto-swap event flow
 4. `docs/metadata-strategy.md` — how to map Coronium modems to the reseller's end-customers without a separate database
-5. Coronium reseller API: <https://github.com/bolivian-peru/coronium-new-app/blob/main/CORONIUM_RESELLER_API.md> (authoritative)
-6. OpenAPI: <https://dashboard.coronium.io/api-docs/> (interactive Swagger UI; basic-auth gated)
+5. Coronium reseller API — authoritative interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
 
 ## The minimum-viable reseller dashboard has six features
 
@@ -132,7 +131,7 @@ When stock is unavailable in the geo:
 ## Hard-coded values worth knowing
 
 - API base: `https://api.coronium.io/api/v3`
-- API docs: `https://dashboard.coronium.io/api-docs/` (basic-auth gated)
+- API docs: `https://dashboard.coronium.io/api-docs/` (public, no login required)
 - JWT lifetime: 365 days, refreshable via `POST /api/v3/wallet-key/rotate-challenge` + `/wallet-key/rotate`
 - Webhook delivery: 5s timeout, no retries v1, no HMAC v1
 - Detection cadence: every 30 min, threshold 5 consecutive failed health checks

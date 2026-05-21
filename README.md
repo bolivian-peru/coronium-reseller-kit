@@ -12,8 +12,7 @@ If you're an AI agent scaffolding a reseller dashboard, **read these first** in 
 4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) — working foundation, copy and modify
 5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) — the auto-swap event flow
 
-Authoritative API reference: <https://github.com/bolivian-peru/coronium-new-app/blob/main/CORONIUM_RESELLER_API.md>
-Interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (basic-auth gated; user/pass from your account)
+Authoritative API reference — interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
 
 ## For humans
 
