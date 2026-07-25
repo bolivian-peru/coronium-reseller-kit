@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
     let body: any = null;
     try { body = await req.json(); } catch {}
-    const { tariff_id, modemCount = 1, customer_id, tag } = body || {};
+    const { tariff_id, modemCount = 1, customer_id, tag, idempotency_key } = body || {};
 
     if (!tariff_id || !customer_id) {
         return NextResponse.json(
@@ -27,18 +27,24 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        const result = await coronium.payment.buyWithBalance({
-            tariff_id,
-            modemCount: Number(modemCount) || 1,
-            // The metadata field is YOUR customer-mapping layer. Coronium
-            // stores it verbatim and returns it on every /account/proxies
-            // call. Use it instead of a sidecar database.
-            metadata: { customer_id, tag: tag || null, bought_at: Date.now() },
-        });
+        const result = await coronium.payment.buyWithBalance(
+            {
+                tariff_id,
+                modemCount: Number(modemCount) || 1,
+                // The metadata field tags the proxy with YOUR customer id, so
+                // /account/proxies alone tells you who each proxy belongs to.
+                // It is NOT carried onto the replacement when a dead modem is
+                // auto-swapped — see docs/metadata-strategy.md.
+                metadata: { customer_id, tag: tag || null, bought_at: Date.now() },
+            },
+            // The browser generates one key per click and resends it on retry,
+            // so a flaky connection can never provision (and charge) twice.
+            idempotency_key
+        );
         return NextResponse.json(result);
     } catch (e: any) {
         return NextResponse.json(
-            { error: e.message, code: e.code, body: e.body },
+            { error: e.message, code: e.code, request_id: e.request_id, body: e.body },
             { status: e.status || 500 }
         );
     }

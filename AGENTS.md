@@ -33,10 +33,12 @@ When the user asks for a dashboard, deliver these. Anything beyond is bonus.
 2. **Use the `metadata` field for customer mapping.** Do NOT create a separate Postgres table to track which Coronium modem belongs to which of the reseller's customers. The `metadata` field on every Modem is freeform JSON, returned in every list, persistent across rotations. Sidecar databases drift out of sync.
 3. **Register the webhook URL via `PUT /api/v3/account/webhook` exactly once on first deploy.** Don't re-PUT every request. Store the registration in the reseller's own state (config file, env, KV) so you know when it's already configured.
 4. **Authenticate via Bearer header** for any new code you write. `?auth_token=` query-param also works but logs to access.log everywhere; Bearer is the right pattern.
-5. **Stock-out is normal.** `POST /payment/buy-modems-with-crypto-balance` returning a stock error (`409`) means we have no inventory in that country/carrier right now. Surface this clearly to the reseller; don't retry-loop.
-6. **Idempotency** — POSTs that create resources accept an optional `Idempotency-Key` header. Use a UUID per buy action; safe-retry will dedupe.
-7. **Don't reinvent the auto-swap logic.** The backend does it. You receive `modem.replaced` events with `{old_modem_id, new_modem_id, new_modem: {...full creds}}`. Update your local mapping atomically and ack 200. That's it.
-8. **For rotations that must succeed-or-fail-honestly, use `?sync=true`.** The default `POST /modems/{id}/restart` and `/modems/rotate-modem-by-token/{token}` return `200` *the instant the request is queued*, **before** the actual rotation completes. Silent failures (stuck worker, sticky carrier IP, daemon error) leave the client with a 200 + unchanged IP. Appending `?sync=true` blocks for up to 25 s and returns the real outcome: `200` with `new_ip` on success, `502 rotation_failed` on confirmed failure, or `503 rotation_timeout`. Use `?sync=true` for any rotation whose result your code branches on. Use the async default only for fire-and-forget timers where the next traffic through the proxy is your verification.
+5. **Stock-out is normal.** `POST /payment/buy-modems-with-crypto-balance` fails when we have no inventory in that country/carrier right now. It currently surfaces as **`500` with `error: "No free modems"`** — there is no `409 stock_unavailable`. Match on the message, surface it clearly, don't retry-loop.
+6. **Idempotency** — `/payment/*` POSTs accept an `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, 24h window; a replay answers with `X-Idempotency-Replay: true`). Generate ONE UUID per buy *intent* — at the moment the human confirms — and resend that same key on every retry. A key derived from a timestamp changes between attempts and buys twice.
+7. **Don't reinvent the auto-swap logic.** The backend does it. You receive `modem.replaced` events; the fields are under `data` (`data.old_modem_id`, `data.new_modem_id`, `data.new_modem`). Update your local mapping, re-stamp the metadata, ack 200.
+8. **Rotation is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** — branch on `rotated`, never on the status code. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
+9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 — a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
+10. **`metadata` is a JSON string, and it is NOT inherited by auto-swap replacements.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamp the new modem with `PUT /modems/{new_modem_id}/set-metadata` or that proxy is permanently unattributed.
 
 ## Architecture you should produce
 
@@ -84,17 +86,29 @@ The proxies themselves stay in Coronium. The reseller's DB only holds end-custom
 
 ## Webhook contract (the most important section)
 
-When a modem the reseller owns dies (5+ consecutive failed health checks AND remaining paid time), Coronium auto-swaps it and POSTs to the webhook URL:
+Every event shares ONE envelope. The event-specific fields are nested under `data` — this is the single most common integration bug, because `body.old_modem_id` silently reads `undefined`.
 
 ```json
 {
+  "event_id": "3f1a…-uuid",
   "event": "modem.replaced",
+  "occurred_at": "2026-07-25T08:34:53.000Z",
+  "account": { "user_id": "6600aa…", "email": "reseller@example.com" },
+  "data": { }
+}
+```
+
+When a modem the reseller owns dies (5+ consecutive failed health checks AND remaining paid time), Coronium auto-swaps it and POSTs `modem.replaced` with:
+
+```json
+"data": {
   "old_modem_id": "69b5926c942c49e02b9f50c7",
   "new_modem_id": "6a1cf4d2942c49e02b1234ab",
   "new_modem": {
     "_id": "6a1cf4d2942c49e02b1234ab",
     "name": "cor_US_NJ_x83",
     "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
+    "portId": "cor_US_…",
     "country_code": "US",
     "carrier_id": "...",
     "host": "172.56.171.4",
@@ -104,38 +118,40 @@ When a modem the reseller owns dies (5+ consecutive failed health checks AND rem
     "proxy_password": "kP3aL9zXq7Wm",
     "tariff_expired_at": 1780987974498,
     "isOnline": true
-  },
-  "ts": 1779192208000
+  }
 }
 ```
 
-When stock is unavailable in the geo:
+When stock is unavailable in the geo, `modem.dead` with:
 
 ```json
-{
-  "event": "modem.dead",
+"data": {
   "old_modem_id": "...",
   "new_modem_id": null,
   "reason": "no_stock" | "pipeline_failed" | "shared_modem" | "tariff_orphan" | "modem_not_found" | "unknown",
-  "remediation": "POST /api/v3/modems/{old_modem_id}/replace later",
-  "ts": ...
+  "remediation": "POST /api/v3/modems/{old_modem_id}/replace to retry, or contact support"
 }
 ```
 
+You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore `proxy.expiring_soon` — the `PUT /account/webhook` response lists it, but nothing emits it.
+
 **Handler must:**
 
-1. `res.sendStatus(200)` first (ack within the 5s timeout)
-2. Then process: update mapping `old_modem_id → new_modem_id`, notify your end-customer with new credentials, log event
-3. Be idempotent — same event may arrive twice across deploys
+1. Verify `X-Coronium-Signature` (`sha256=<hmac-sha256 of the RAW body>`) against the account's signing secret, over the raw bytes — not the re-serialized JSON
+2. `res.sendStatus(200)` fast (ack within the 5s timeout)
+3. Then process: update mapping `data.old_modem_id → data.new_modem_id`, **re-stamp metadata on the new modem**, notify your end-customer with new credentials, log event
+4. Be idempotent, keyed on `event_id` — a non-2xx is retried up to 8 times with backoff, and Coronium can replay dead-lettered events
 
 ## Hard-coded values worth knowing
 
 - API base: `https://api.coronium.io/api/v3`
 - API docs: `https://dashboard.coronium.io/api-docs/` (public, no login required)
 - JWT lifetime: 365 days, refreshable via `POST /api/v3/wallet-key/rotate-challenge` + `/wallet-key/rotate`
-- Webhook delivery: 5s timeout, no retries v1, no HMAC v1
+- Webhook delivery: 5s timeout, up to 8 attempts with escalating backoff, then dead-letter; HMAC-signed via `X-Coronium-Signature` + `X-Coronium-Event-Id`; redirects not followed
 - Detection cadence: every 30 min, threshold 5 consecutive failed health checks
 - Refresh cadence for `/account/proxies/health`: 30 min server-side (cache client-side 30-60s)
+- `GET /tariffs/available` needs no auth — handy as a connectivity check
+- Error envelope on 4xx/5xx: `{error, code, suggested_action, request_id, documentation_url?}` + `X-Request-Id` header. No `message` field
 - Currency: USD throughout; cents for Stripe payments, dollars for crypto/balance
 
 ## When user asks for features beyond the minimum
@@ -153,10 +169,15 @@ Common requests and the right answer:
 | Symptom | What it means | What to do |
 |---|---|---|
 | `401 Unauthorized` on any call | API key invalid or expired | Show "reauthorize" UI; user pastes a fresh key |
-| `409 stock_unavailable` on buy | No proxies in that country/carrier right now | Show "try different country" UX, don't retry-loop |
-| `429 Rate limited` | Hitting our rate limiter | Back off exponentially; show toast |
-| Webhook never fires after a modem dies | Customer hasn't set their webhook URL, OR delivery failed | Check `PUT /account/webhook` was called once; fallback to polling `/account/proxies/health` every 5 min |
+| `500` + `error: "No free modems"` on buy | No proxies in that country/carrier right now | Show "try different country" UX, don't retry-loop |
+| `500` + `error: "Bad modem count"` | You sent `modem_count`/`count`, or a non-positive number | The field is `modemCount` |
+| `400` on set-rotation-interval | Value between 1 and 59 | The unit is SECONDS; minimum 60, or 0 to disable |
+| `200` with `rotated: false` | Rotation ran but the IP did not change | Retry after a few seconds; if it persists, `/replace` the modem |
+| `429` on rotate-by-token | Inside the ~60 s per-modem cooldown | Back off; don't hammer |
+| Webhook fields all `undefined` | You're reading the top level | They're under `data` — `body.data.old_modem_id` |
+| Webhook never fires after a modem dies | No webhook URL set, or your endpoint is failing | Run `POST /account/webhook/test` — it returns your endpoint's actual response |
 | `modem.dead` with `reason: "no_stock"` | We tried to swap, couldn't find replacement geo | Notify your customer, retry-`replace` manually later |
+| Swapped proxy shows as unassigned | Metadata isn't carried onto replacements | Re-stamp via `PUT /modems/{id}/set-metadata` in your webhook handler |
 
 ## When you're done
 

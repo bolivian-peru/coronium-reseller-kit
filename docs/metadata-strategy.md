@@ -6,18 +6,14 @@ How to track which Coronium modem belongs to which of your end-customers — wit
 
 Every Modem record in Coronium has a freeform `metadata` field. It's a JSON string. **You control it.** Coronium stores it verbatim and returns it on every `/account/proxies` call.
 
-Stamp it when you buy:
+Stamp it when you buy. Send it **pre-stringified** — the column is a string server-side, so passing a bare object is not guaranteed to round-trip:
 
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
 {
   "tariff_id": "61ef075c5a33f238ac15a8e7",
   "modemCount": 1,
-  "metadata": {
-    "customer_id": "acme-007",
-    "tag": "tiktok-batch",
-    "internal_invoice": "INV-2026-04-1213"
-  }
+  "metadata": "{\"customer_id\":\"acme-007\",\"tag\":\"tiktok-batch\",\"internal_invoice\":\"INV-2026-04-1213\"}"
 }
 ```
 
@@ -42,16 +38,26 @@ Note: `metadata` comes back as a JSON string, not a parsed object. JSON-parse it
 
 ## Why this beats a sidecar database
 
-If you stored "modem 69b5… belongs to acme-007" in your own Postgres table, you'd need to keep it in sync across:
+If you stored "modem 69b5… belongs to acme-007" only in your own Postgres table, you'd need to keep it in sync across:
 
-- Modem replacements (auto-swap creates a new ID — you'd need a webhook handler to update your table)
 - Renewals (creates a new payment row, but modem_id stays — you don't strictly need to update, but easy to mishandle)
 - Refunds (modem deleted on Coronium side — your table would have a dangling row)
 - Manual admin actions on Coronium side
 
-With `metadata`, the truth lives on the modem record. The webhook handler updates `customer_id → new_modem_id` mapping but the `metadata.customer_id` on the new modem is automatically stamped by Coronium when we provision the replacement (we copy it forward in the swap pipeline).
+With `metadata`, the truth for those cases lives on the modem record itself and `GET /account/proxies` alone tells you who owns what.
 
-**Wait — is the metadata copied on auto-swap?** Yes, since 2026-05-19 (the auto-swap pipeline calls the same provisioning logic as a manual `/replace` and the metadata flows through). If you find a swapped modem missing the metadata, file a ticket — that's a regression.
+## ⚠️ The one case metadata does NOT cover: auto-swap
+
+**Metadata is NOT copied onto the replacement modem.** The swap transfers the remaining paid time and nothing else — the new modem's `metadata` is empty. If you rely on metadata alone, every auto-swapped proxy silently becomes `<unassigned>` and you lose the link to your customer exactly when you most need it.
+
+Handle it in your `modem.replaced` webhook:
+
+```ts
+// After you've updated your own record old_modem_id → new_modem_id:
+await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
+```
+
+Because of this, keep a **minimal** local record of `customer_id → current modem_id` as your durable link, and treat metadata as the convenient denormalized copy that makes `/account/proxies` self-describing. That local record is also what lets you find the customer from `old_modem_id` when the swap event arrives.
 
 ## What to put in metadata
 
@@ -91,9 +97,9 @@ For >1000 proxies the filter becomes noticeable. At that scale, build an in-memo
 
 ## Updating metadata after purchase
 
-Right now, metadata is set on purchase and persists. To update it later (e.g., reassigning a proxy to a different customer), use `PUT /api/v3/modems/:id/set-metadata` (if your account has access) or delete + repurchase.
+`PUT /api/v3/modems/{id}/set-metadata` with `{"metadata": "<json string>"}` replaces it wholesale (there is no partial merge — send the complete object). It accepts a bare object too and stringifies it for you, but sending a string keeps buy and update paths identical.
 
-Most reseller flows don't need to update metadata mid-life — the customer_id stays with the modem until it expires or gets replaced.
+You need this in two situations: reassigning a proxy to a different customer, and re-stamping a replacement after an auto-swap (see above).
 
 ## Don't put end-customer auth in metadata
 

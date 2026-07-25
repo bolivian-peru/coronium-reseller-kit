@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { coronium, Proxy, HealthRow } from '@/lib/coronium';
+import { coronium, parseMetadata, Proxy, HealthRow } from '@/lib/coronium';
 import { customers } from '@/lib/customers';
 import { notFound } from 'next/navigation';
 
@@ -18,12 +18,9 @@ export default async function CustomerPage({ params }: { params: { id: string } 
             coronium.proxies.list(),
             coronium.proxies.health().catch(() => ({ modems: [] as HealthRow[] } as any)),
         ]);
-        proxies = (proxiesRes.data || []).filter((p) => {
-            try {
-                const md = typeof p.metadata === 'string' ? JSON.parse(p.metadata) : p.metadata;
-                return md?.customer_id === params.id;
-            } catch { return false; }
-        });
+        proxies = (proxiesRes.data || []).filter(
+            (p) => parseMetadata(p.metadata).customer_id === params.id
+        );
         for (const h of healthRes?.modems || []) healthByModem.set(h.modem_id, h);
     } catch (e: any) {
         err = e.message;

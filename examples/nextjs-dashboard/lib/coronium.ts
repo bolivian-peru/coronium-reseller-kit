@@ -35,9 +35,15 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     let body: any = null;
     try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
     if (!r.ok) {
+        // Every /api/v3 4xx/5xx carries the reseller error envelope:
+        // { error, code, suggested_action, request_id, documentation_url? }.
+        // `error` is the human string, `code` the machine identifier. Quote
+        // request_id (also on the X-Request-Id header) when opening a ticket.
         const err: any = new Error(body?.error || `Coronium ${r.status}`);
         err.status = r.status;
         err.code = body?.code;
+        err.suggested_action = body?.suggested_action;
+        err.request_id = body?.request_id || r.headers.get('x-request-id');
         err.body = body;
         throw err;
     }
@@ -59,7 +65,7 @@ export interface Proxy {
     tariff_expired_at?: number;
     metadata?: string;  // freeform JSON string the reseller controls
     country_id?: string;
-    rotation_interval?: number;
+    rotation_interval?: number;  // SECONDS between auto-rotations; 0 = disabled
     isOnline?: boolean;
 }
 
@@ -99,7 +105,23 @@ export interface Tariff {
 
 export interface BuyResult {
     result: 'ok';
+    charged_usd: number;
+    currency: 'USD';
     data: Array<{ _id: string; name: string; ext_ip: string; http_port: string; socks_port: string; proxy_login: string; proxy_password: string; metadata?: string }>;
+    /** Itemized breakdown so you can reconcile the charge without a second call. */
+    billing: {
+        schema_version: number;
+        action: 'purchase' | 'renewal';
+        lane: string;
+        currency: 'USD';
+        line_items: Array<{ kind: string; name: string | null; plan?: string; days?: number; quantity: number; unit_price_usd: number; line_total_usd: number }>;
+        subtotal_usd: number;
+        discount: { code?: string; amount_usd?: number } | null;
+        charged_usd: number;
+        balance_before_usd: number | null;
+        balance_after_usd: number | null;
+        settlement: { asset: string; amount_btc?: number; exchange_rate_usd_per_btc?: number } | null;
+    };
 }
 
 // ─── API surface ─────────────────────────────────────────────────────────
@@ -112,36 +134,70 @@ export const coronium = {
         list: () => call<{ data: Proxy[] }>('/account/proxies'),
         health: () => call<HealthResponse>('/account/proxies/health'),
         /**
-         * Rotate a modem's IP. Defaults to ?sync=true so the response tells
-         * you the truth: 200 = rotated (new_ip in body), 502 = confirmed
-         * failure, 503 = worker timeout. Pass {sync: false} for the
-         * fire-and-forget legacy behaviour (200 returns instantly on enqueue,
-         * does NOT mean the IP changed — your code must verify separately).
+         * Rotate a modem's IP. This call is SYNCHRONOUS — it holds the request
+         * open until the carrier has actually handed out a new IP, then tells
+         * you what happened.
          *
-         * For automation that branches on rotation success (account-creation
-         * bots, anti-detect frameworks, quota-driven loops), keep the default.
+         * THE TRAP: it answers 200 whether or not the IP changed. Branch on
+         * `rotated`, never on the HTTP status:
+         *   { result: 'ok', rotated: true,  ip: '<new IP>', message }
+         *   { result: 'ok', rotated: false, ip: '<unchanged IP>', message }
+         *
+         * `rotated: false` is a FAILED rotation returned with a 200. Treating
+         * a 2xx as success is the single most common integration bug here.
          */
-        rotate: (id: string, opts?: { sync?: boolean }) => {
-            const sync = opts?.sync !== false;  // default true
-            const qs = sync ? '?sync=true' : '';
-            return call<{result: string; ext_ip?: string; new_ip?: string; code?: string; error?: string}>(
-                `/modems/${id}/restart${qs}`,
+        rotate: (id: string) =>
+            call<{ result: string; rotated: boolean; ip: string | null; message: string }>(
+                `/modems/${id}/restart`,
                 { method: 'POST' }
-            );
-        },
+            ),
         replace: (id: string) =>
             call<any>(`/modems/${id}/replace`, { method: 'POST' }),
-        // setRotationInterval, setMetadata, etc. — add if needed
+        /**
+         * Auto-rotate every N SECONDS. Minimum 60; 0 disables. Sending minutes
+         * here (e.g. 5 meaning "5 minutes") is rejected with a 400 — anything
+         * between 1 and 59 is invalid.
+         */
+        setRotationInterval: (id: string, seconds: number) =>
+            call<{ result: string; data: { _id: string; name: string; rotation_interval: number } }>(
+                `/modems/${id}/set-rotation-interval`,
+                { method: 'PUT', body: JSON.stringify({ rotation_interval: seconds }) }
+            ),
+        /** Re-stamp the customer-mapping metadata on an existing proxy. */
+        setMetadata: (id: string, metadata: Record<string, any>) =>
+            call<{ result: string }>(`/modems/${id}/set-metadata`, {
+                method: 'PUT',
+                body: JSON.stringify({ metadata: JSON.stringify(metadata) }),
+            }),
     },
     tariffs: {
         listAvailable: () => call<{ data: Tariff[] }>('/tariffs/available'),
     },
     payment: {
-        buyWithBalance: (args: { tariff_id: string; modemCount: number; metadata?: Record<string, any> }) =>
+        /**
+         * Buy `modemCount` proxies on the tariff. Country and carrier come from
+         * the TARIFF — sending them in the body does nothing.
+         *
+         * `idempotencyKey` must be ONE stable key per buy intent, reused across
+         * every retry of that intent. Replaying it within 24h returns the
+         * original response (with `X-Idempotency-Replay: true`) instead of
+         * provisioning — and charging — a second time. Generate it once, at the
+         * point the human clicks Buy, never per HTTP attempt.
+         */
+        buyWithBalance: (
+            args: { tariff_id: string; modemCount: number; metadata?: Record<string, any> },
+            idempotencyKey?: string
+        ) =>
             call<BuyResult>('/payment/buy-modems-with-crypto-balance', {
                 method: 'POST',
-                body: JSON.stringify(args),
-                headers: { 'Idempotency-Key': cryptoIdempotencyKey(args) },
+                // metadata is a String column server-side — send it pre-stringified
+                // so it round-trips as the same JSON you sent.
+                body: JSON.stringify({
+                    tariff_id: args.tariff_id,
+                    modemCount: args.modemCount,
+                    ...(args.metadata ? { metadata: JSON.stringify(args.metadata) } : {}),
+                }),
+                headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
             }),
     },
     webhook: {
@@ -151,20 +207,24 @@ export const coronium = {
                 method: 'PUT',
                 body: JSON.stringify({ webhook_url: url }),
             }),
+        /**
+         * Fire a real `webhook.test` POST at your registered URL and return the
+         * actual delivery result (status code + latency). Use this instead of
+         * waiting for a modem to die to find out your endpoint is misconfigured.
+         */
+        test: () => call<any>('/account/webhook/test', { method: 'POST' }),
     },
 };
 
-// ─── Idempotency helper ───────────────────────────────────────────────────
-// Generates a stable key per (tariff, count, customer) tuple. If the buy POST
-// is retried with the same payload within 24h, the backend returns the
-// original 2xx response instead of provisioning twice.
-function cryptoIdempotencyKey(args: { tariff_id: string; modemCount: number; metadata?: any }): string {
-    const seed = `${args.tariff_id}:${args.modemCount}:${JSON.stringify(args.metadata || {})}:${Math.floor(Date.now() / 60000)}`;
-    // Simple FNV-1a-ish — good enough for a 1-minute idempotency window.
-    let h = 2166136261;
-    for (let i = 0; i < seed.length; i++) {
-        h ^= seed.charCodeAt(i);
-        h = Math.imul(h, 16777619);
+// ─── Metadata helper ──────────────────────────────────────────────────────
+// `metadata` comes back as a JSON string. Parse defensively: it is freeform
+// text you control, so a bad write shouldn't crash a list render.
+export function parseMetadata(raw: string | undefined | null): Record<string, any> {
+    if (!raw) return {};
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
     }
-    return `buy_${(h >>> 0).toString(36)}_${Math.floor(Date.now() / 60000).toString(36)}`;
 }

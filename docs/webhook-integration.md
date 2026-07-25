@@ -29,114 +29,190 @@ curl -X PUT https://api.coronium.io/api/v3/account/webhook \
   -d '{"webhook_url":"https://your-host/api/coronium/webhook?key=<your-secret>"}'
 ```
 
-`webhook_url` must be **HTTPS** (HTTP returns 400). Max length 500 chars. Path / query string is freeform — use it for shared secrets or routing.
+`webhook_url` must be **HTTPS** (HTTP returns 400). Max length 500 chars. Path / query string is freeform — use it for shared secrets or routing. The target must be a public host: internal, private and non-resolving addresses are rejected with `code: "invalid_webhook_target"`.
 
 Disable later with `{"webhook_url": null}`.
 
-## Event types (v1)
+## Verify your endpoint before you rely on it
+
+```bash
+curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
+  -H "Authorization: Bearer $CORONIUM_API_KEY"
+```
+
+This POSTs a real signed `webhook.test` event to your registered URL **synchronously** and returns the actual delivery outcome — the HTTP status your endpoint replied with, plus latency. Run it on every deploy. Without it, "we never get events" is indistinguishable from "our endpoint has been 500ing for a month".
+
+## The envelope — every event has the same shape
+
+```json
+{
+  "event_id": "3f1a…-uuid",
+  "event": "modem.replaced",
+  "occurred_at": "2026-07-25T08:34:53.000Z",
+  "account": { "user_id": "6600aa…", "email": "you@example.com" },
+  "data": { }
+}
+```
+
+**Event-specific fields live under `data`.** Reading `body.old_modem_id` returns `undefined` — it is `body.data.old_modem_id`. Dedupe on `event_id`.
+
+## Event types
 
 ### `modem.replaced` — auto-swap succeeded
 
 ```json
 {
   "event": "modem.replaced",
-  "old_modem_id": "69b5926c942c49e02b9f50c7",
-  "new_modem_id": "6a1cf4d2942c49e02b1234ab",
-  "new_modem": {
-    "_id": "6a1cf4d2942c49e02b1234ab",
-    "name": "cor_US_NJ_x83",
-    "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
-    "country_code": "US",
-    "carrier_id": "6519b2095df31c2dd53fa0ad",
-    "host": "172.56.171.4",
-    "http_port": "8042",
-    "socks_port": "5042",
-    "proxy_login": "admin",
-    "proxy_password": "kP3aL9zXq7Wm",
-    "tariff_expired_at": 1780987974498,
-    "isOnline": true
-  },
-  "ts": 1779192208000
+  "data": {
+    "old_modem_id": "69b5926c942c49e02b9f50c7",
+    "new_modem_id": "6a1cf4d2942c49e02b1234ab",
+    "new_modem": {
+      "_id": "6a1cf4d2942c49e02b1234ab",
+      "name": "cor_US_NJ_x83",
+      "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
+      "portId": "cor_US_…",
+      "country_code": "US",
+      "carrier_id": "6519b2095df31c2dd53fa0ad",
+      "host": "172.56.171.4",
+      "http_port": "8042",
+      "socks_port": "5042",
+      "proxy_login": "admin",
+      "proxy_password": "kP3aL9zXq7Wm",
+      "tariff_expired_at": 1780987974498,
+      "isOnline": true
+    }
+  }
 }
 ```
+
+The replacement carries the remaining paid time — but **not** the original's `metadata`. Re-stamp it via `PUT /modems/{new_modem_id}/set-metadata` or the proxy loses its customer tag. See [`metadata-strategy.md`](./metadata-strategy.md).
 
 ### `modem.dead` — auto-swap couldn't complete
 
 ```json
 {
   "event": "modem.dead",
-  "old_modem_id": "69b5926c942c49e02b9f50c7",
-  "new_modem_id": null,
-  "reason": "no_stock",
-  "remediation": "POST /api/v3/modems/69b5926c942c49e02b9f50c7/replace later",
-  "ts": 1779192208000
+  "data": {
+    "old_modem_id": "69b5926c942c49e02b9f50c7",
+    "new_modem_id": null,
+    "reason": "no_stock",
+    "remediation": "POST /api/v3/modems/69b5926c942c49e02b9f50c7/replace to retry, or contact support"
+  }
 }
 ```
 
 `reason` values: `no_stock`, `pipeline_failed`, `shared_modem`, `tariff_orphan`, `modem_not_found`, `unknown`.
 
-## Delivery semantics (v1)
+### Lifecycle events
 
-- **One POST per event.** No retries.
-- **5-second timeout.** Ack 200 fast or you miss it (email fallback still fires).
-- **No HMAC signature in v1.** Bind your endpoint behind a shared secret in the URL itself (`?key=...`). HMAC header is on the roadmap; open a GitHub issue if you need it for your security review.
-- **Cooldown 24h per modem.** We don't fire two events for the same modem within 24 hours.
-- **No event ordering guarantee.** Use `ts` (epoch ms) to detect out-of-order delivery; the latest one wins.
+| Event | `data` |
+|---|---|
+| `proxy.purchased` | `{order_id, amount_usd, provider, days, count, proxies[]}` |
+| `proxy.renewed` | same as purchased |
+| `proxy.expired` | `{proxy}` |
+| `webhook.test` | `{message}` — only from the test endpoint |
+
+Each entry in `proxies[]` is `{proxy_id, modem_id, country, carrier, http_port, socks_port, ext_ip, expires_at}`.
+
+> The `PUT /account/webhook` response also advertises `proxy.expiring_soon`. **It never fires** — the code path that would emit it has no callers. Don't build advance-expiry logic on it; poll `tariff_expired_at` from `/account/proxies` instead.
+
+## Delivery semantics
+
+- **Signed.** Every POST carries `X-Coronium-Signature: sha256=<hex>` — an HMAC-SHA256 of the raw body under your signing secret — plus `X-Coronium-Event-Id`. Ask support for your secret and verify it (see below).
+- **Durable, with retries.** Up to **8 attempts** with escalating backoff, then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent — dedupe on `event_id`.
+- **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried.
+- **Redirects are not followed.** Register the final URL.
+- **Cooldown per modem** on the dead-modem path — you won't get two swap events for the same modem back-to-back.
+- **No ordering guarantee.** Use `occurred_at` (ISO 8601) to resolve out-of-order delivery; the latest wins.
+
+## Verifying the signature
+
+Compute the HMAC over the **raw request bytes**. Re-serializing the parsed JSON changes the bytes and the signature will never match.
+
+```js
+import { createHmac, timingSafeEqual } from 'crypto';
+
+function verify(rawBody, header, secret) {
+    if (!header) return false;
+    const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex');
+    const a = Buffer.from(expected);
+    const b = Buffer.from(header);
+    return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+In Express, capture the raw body with `express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } })`.
 
 ## Required handler properties
 
 ```ts
 app.post('/api/coronium/webhook', async (req, res) => {
-    // 1. ACK FIRST. Don't block on processing.
+    // 1. Verify the signature over the RAW bytes, before trusting anything.
+    if (!verify(req.rawBody, req.get('x-coronium-signature'), SECRET)) {
+        return res.sendStatus(401);
+    }
+
+    // 2. ACK FAST. Don't block on processing — a slow 200 is retried.
     res.sendStatus(200);
 
-    // 2. Persist the raw event (replay safety)
+    // 3. Persist the raw event (replay safety)
     await persistRaw(req.body);
 
-    // 3. Process async — never re-throw inside this handler
+    // 4. Process async — never re-throw inside this handler
     queueMicrotask(() => process(req.body).catch(logErr));
 });
 
 async function process(evt) {
+    // Skip anything we've already handled — retries and replays are normal.
+    if (await alreadyProcessed(evt.event_id)) return;
+
+    const data = evt.data;
+
     if (evt.event === 'modem.replaced') {
         // Lookup the customer by the OLD modem id (your metadata.customer_id
         // was stamped when you bought it).
-        const customer = await findCustomerByOldModemId(evt.old_modem_id);
+        const customer = await findCustomerByOldModemId(data.old_modem_id);
 
         // Update mapping atomically — single write, single source of truth.
         await updateCustomer(customer.id, {
-            modem_id: evt.new_modem_id,
-            host: evt.new_modem.host,
-            http_port: evt.new_modem.http_port,
-            socks_port: evt.new_modem.socks_port,
-            proxy_login: evt.new_modem.proxy_login,
-            proxy_password: evt.new_modem.proxy_password,
-            tariff_expired_at: evt.new_modem.tariff_expired_at,
+            modem_id: data.new_modem_id,
+            host: data.new_modem.host,
+            http_port: data.new_modem.http_port,
+            socks_port: data.new_modem.socks_port,
+            proxy_login: data.new_modem.proxy_login,
+            proxy_password: data.new_modem.proxy_password,
+            tariff_expired_at: data.new_modem.tariff_expired_at,
         });
 
+        // The replacement has no metadata — re-stamp it so /account/proxies
+        // still tells you who owns this proxy.
+        await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
+
         // Notify the customer.
-        await emailNewCredentials(customer.email, evt.new_modem);
+        await emailNewCredentials(customer.email, data.new_modem);
     }
 
     if (evt.event === 'modem.dead') {
-        const customer = await findCustomerByOldModemId(evt.old_modem_id);
-        await flagOutage(customer.id, evt.reason);
-        await emailOutage(customer.email, evt.reason);
+        const customer = await findCustomerByOldModemId(data.old_modem_id);
+        await flagOutage(customer.id, data.reason);
+        await emailOutage(customer.email, data.reason);
         // Optionally: schedule retry of POST /modems/{old_modem_id}/replace
         // for when stock might return.
     }
+
+    await markProcessed(evt.event_id);
 }
 ```
 
 ## Idempotency
 
-Coronium's cooldown prevents back-to-back duplicate events, but you should still be idempotent in case:
+Delivery retries on any non-2xx, so duplicates are expected, not theoretical. You also need idempotency when:
 
 - You re-deploy and replay events from the log
-- Network glitches cause our delivery to retry (theoretical — v1 doesn't, but assume it might in v2)
+- Coronium replays a dead-lettered event from the admin outbox
 - You manually replay from your event store
 
-Pattern: use `(event, old_modem_id, ts)` as a unique key when writing to your event log.
+Pattern: use `event_id` as the unique key when writing to your event log, and no-op on conflict.
 
 ## Testing locally
 
@@ -146,19 +222,32 @@ Use `ngrok` to expose your local dev server to Coronium during integration:
 ngrok http 3000
 ```
 
-Then `PUT /account/webhook` with the ngrok HTTPS URL, plug a dongle into your test ProxySmart server, let it sit until health checks accumulate failures. Or — easier — manually POST a fake event:
+`PUT /account/webhook` with the ngrok HTTPS URL, then fire a real signed event at it:
+
+```bash
+curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
+  -H "Authorization: Bearer $CORONIUM_API_KEY"
+```
+
+To exercise your handler's branches offline, POST a fake event yourself — note the `data` nesting:
 
 ```bash
 curl -X POST http://localhost:3000/api/coronium/webhook \
   -H "Content-Type: application/json" \
   -d '{
+    "event_id": "local-test-1",
     "event": "modem.replaced",
-    "old_modem_id": "test-old",
-    "new_modem_id": "test-new",
-    "new_modem": { "host": "test", "http_port": "8000", "socks_port": "5000", "proxy_login": "u", "proxy_password": "p", "tariff_expired_at": 9999999999, "isOnline": true },
-    "ts": 1
+    "occurred_at": "2026-07-25T08:34:53.000Z",
+    "account": { "user_id": "test", "email": "you@example.com" },
+    "data": {
+      "old_modem_id": "test-old",
+      "new_modem_id": "test-new",
+      "new_modem": { "host": "test", "http_port": "8000", "socks_port": "5000", "proxy_login": "u", "proxy_password": "p", "tariff_expired_at": 9999999999, "isOnline": true }
+    }
   }'
 ```
+
+Leave your signing secret unset locally, or this unsigned request is correctly rejected with 401.
 
 ## When the webhook is NOT enough
 

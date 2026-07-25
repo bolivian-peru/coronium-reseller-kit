@@ -45,11 +45,14 @@ export function BuyForm({
         setBusy(true);
         setErr(null);
         setResult(null);
+        // One idempotency key per click. If this request is retried, the same
+        // key returns the original result instead of buying (and billing) twice.
+        const idempotency_key = crypto.randomUUID();
         try {
             const r = await fetch('/api/coronium/buy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tariff_id, modemCount: count, customer_id, tag: tag || null }),
+                body: JSON.stringify({ tariff_id, modemCount: count, customer_id, tag: tag || null, idempotency_key }),
             });
             const body = await r.json();
             if (!r.ok) throw new Error(body?.error || `Failed (${r.status})`);

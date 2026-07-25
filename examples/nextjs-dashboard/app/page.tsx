@@ -5,7 +5,7 @@
  * wrapper. No CORONIUM_API_KEY ever touches the browser.
  */
 import Link from 'next/link';
-import { coronium, Proxy, HealthRow } from '@/lib/coronium';
+import { coronium, parseMetadata, Proxy, HealthRow } from '@/lib/coronium';
 import { customers } from '@/lib/customers';
 
 export const dynamic = 'force-dynamic';
@@ -41,10 +41,8 @@ export default async function HomePage() {
     const byCustomer = new Map<string, Proxy[]>();
     for (const p of proxies) {
         let cid = '<unassigned>';
-        try {
-            const md = typeof p.metadata === 'string' ? JSON.parse(p.metadata) : p.metadata;
-            if (md?.customer_id) cid = md.customer_id;
-        } catch { /* ignore */ }
+        const md = parseMetadata(p.metadata);
+        if (md.customer_id) cid = md.customer_id;
         if (!byCustomer.has(cid)) byCustomer.set(cid, []);
         byCustomer.get(cid)!.push(p);
     }
