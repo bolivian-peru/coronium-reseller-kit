@@ -115,7 +115,11 @@ POST /api/v3/payment/buy-modems-with-crypto-balance
 
 Every `GET /account/proxies` returns the same `metadata` verbatim. Filter client-side by `customer_id`. Full pattern in [`docs/metadata-strategy.md`](./docs/metadata-strategy.md).
 
-The 200 also carries an itemized `billing` block (`line_items`, `subtotal_usd`, `discount`, `charged_usd`, `settlement`) so you can reconcile the charge without a second call.
+The 200 also carries an itemized `billing` block (`line_items`, `subtotal_usd`, `discount`, `charged_usd`, `settlement`) so you can reconcile the charge without a second call — **price before coupon** is `subtotal_usd`, **price after coupon** is `charged_usd`, and every figure ties out to the cent. Plus a `webhook` receipt telling you whether an event is coming and which `event_id` to match it on.
+
+Each proxy also carries `carrier: {_id, name, code}`. **Renewals are billed against that modem's own tariff**, so filter renewal options on `carrier._id` — pricing against the country alone will quote the wrong plan.
+
+Full reference: [docs/billing-and-reconciliation.md](docs/billing-and-reconciliation.md).
 
 ### 2. Auto-swap is push, not pull
 

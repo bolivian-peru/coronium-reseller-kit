@@ -29,6 +29,18 @@ When the user asks for a dashboard, deliver these. Anything beyond is bonus.
 
 ## Hard rules — do not violate
 
+**Renewals: filter on `carrier._id`, never country alone.** Coronium bills a renewal against
+that modem's OWN tariff. Every proxy carries `carrier: {_id, name, code}` — if you offer the
+cheapest same-country plan across all carriers you WILL quote below cost (a $99/mo France Free
+modem priced at the $79/mo LycaMobile rate is a real incident, 2026-07-27).
+
+**Reconcile from the response, not from a second call.** `billing.subtotal_usd` is the price
+before coupon, `billing.charged_usd` after, `billing.discount.amount_usd` the delta, and they
+tie out to the cent. See docs/billing-and-reconciliation.md.
+
+**Check `webhook.configured` on the first purchase.** If it is `false`, no event will ever
+arrive and your fulfilment flow must poll instead of wait.
+
 1. **Never put `CORONIUM_API_KEY` in client-side code.** All API calls must go through server routes (Next.js `app/api/...`, or Express/Fastify proxy). The dashboard is hosted by the reseller; their token must not leak to browsers.
 2. **Use the `metadata` field for customer mapping.** Do NOT create a separate Postgres table to track which Coronium modem belongs to which of the reseller's customers. The `metadata` field on every Modem is freeform JSON, returned in every list, persistent across rotations. Sidecar databases drift out of sync.
 3. **Register the webhook URL via `PUT /api/v3/account/webhook` exactly once on first deploy.** Don't re-PUT every request. Store the registration in the reseller's own state (config file, env, KV) so you know when it's already configured.

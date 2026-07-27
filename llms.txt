@@ -10,6 +10,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 
 1. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md> — your instructions
 2. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/PROMPT.md> — the prompts the human will paste
+3. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/billing-and-reconciliation.md> — charged amount, coupon before/after, carrier, webhook receipt
 3. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> — working foundation
 4. <https://dashboard.coronium.io/api-docs/> — authoritative interactive API reference (OpenAPI / Swagger UI, public)
 

@@ -110,11 +110,33 @@ The replacement carries the remaining paid time — but **not** the original's `
 | `proxy.purchased` | `{order_id, amount_usd, provider, days, count, proxies[]}` |
 | `proxy.renewed` | same as purchased |
 | `proxy.expired` | `{proxy}` |
+| `deposit.confirmed` | `{amount_usd, provider, external_id}` — a balance top-up cleared |
 | `webhook.test` | `{message}` — only from the test endpoint |
 
 Each entry in `proxies[]` is `{proxy_id, modem_id, country, carrier, http_port, socks_port, ext_ip, expires_at}`.
 
 > The `PUT /account/webhook` response also advertises `proxy.expiring_soon`. **It never fires** — the code path that would emit it has no callers. Don't build advance-expiry logic on it; poll `tariff_expired_at` from `/account/proxies` instead.
+
+## Knowing an event is coming, before it arrives
+
+Every purchase/renew `200` now carries a `webhook` receipt:
+
+```jsonc
+"webhook": {
+  "configured": true,
+  "event": "proxy.purchased",
+  "event_id": "3f1a…-uuid",   // the id the delivered event will carry — match on this
+  "status": "queued",          // outbox state, NOT delivery
+  "delivery": "pending"
+}
+```
+
+`configured: false` means you have no `https` webhook URL registered and **no event will ever
+arrive** — register one with `PUT /api/v3/account/webhook`. This exists so "Coronium never
+sent it" stops looking identical to "our receiver is down".
+
+`status: "queued"` never claims delivery; it means the event is durably in the outbox and the
+delivery worker owns it. Full field reference: [billing-and-reconciliation.md](billing-and-reconciliation.md).
 
 ## Delivery semantics
 
