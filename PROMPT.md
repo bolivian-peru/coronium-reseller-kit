@@ -10,14 +10,18 @@ proxies with these features (skip any I don't list):
 - Buy proxies on a customer's behalf — pick country/carrier, attach customer_id
   via the metadata field, show resulting credentials
 - Per-customer detail page with their proxies + health status + credential copy
-- Webhook handler at /api/coronium/webhook that processes modem.replaced and
-  modem.dead events — update local mapping, log event, ack 200 immediately
+- Signed webhook handler at /api/coronium/webhook: verify HMAC, persist by
+  event_id, then ack 200. A durable worker reconciles replacements and flags
+  modem.dead or purchase-failed events for operator review.
 - Health overview: poll /account/proxies/health every 60s, highlight dead modems
+- API-only integration instructions: Bearer authentication, account balances,
+  tariff stock, purchase, renewal quote, renewal, separate PocketProxy endpoints,
+  idempotency, and the raw Swagger reference at https://dashboard.coronium.io/api-docs/
 
-My CORONIUM_API_KEY is in .env. Deploy target: Vercel. Use Next.js App Router,
-TypeScript, Tailwind. Don't invent features I didn't ask for — keep it
-minimal and readable. End by running `npm run dev`, opening the browser, and
-buying ONE proxy to verify the end-to-end loop works.
+My CORONIUM_API_KEY is in .env. Deploy target: a self-hosted persistent volume.
+Use Next.js App Router, TypeScript, Tailwind, operator authentication, and a
+durable webhook inbox. Keep it minimal and readable. Run build and read-only
+integration checks. Ask me before a live purchase that spends my balance.
 ```
 
 ## Variants
@@ -26,10 +30,11 @@ buying ONE proxy to verify the end-to-end loop works.
 
 ```
 Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
-and build me a Node CLI that lets me buy/rotate/replace Coronium proxies on
-behalf of named customers. Store customers in a local JSON file. Use
-coronium-sdk. Skip the webhook handler. Target ergonomics: `cor buy us
-acme-007 --count 5`.
+and https://dashboard.coronium.io/api-docs/. Build a Node CLI directly against
+the REST API using Bearer auth and server-side secrets. It should list tariffs,
+show account credit and BTC separately, buy with a stable Idempotency-Key,
+quote and renew an owned modem, and display PocketProxy HTTP/SOCKS5 endpoints
+separately. Store customer mappings durably. No dashboard is required.
 ```
 
 **For a Telegram-bot reseller**:
@@ -53,4 +58,7 @@ customer metadata) with the new modem credentials atomically.
 
 ## After Claude finishes
 
-It'll show you a local URL. Open it. Do one test buy. If credentials show up in your dashboard AND the proxy actually proxies traffic (curl through it to `ipify.org`), you're done. Push to Vercel. Tell the bot the new URL so it registers your webhook.
+It should show a local URL and pass its build and read-only checks. For a paid
+end-to-end test, authorize one purchase, verify both protocols with the returned
+credentials, and inspect the billing receipt. Use a persistent host for SQLite;
+serverless needs a different durable store. Register the public signed webhook URL.

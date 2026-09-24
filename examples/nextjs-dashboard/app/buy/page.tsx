@@ -4,7 +4,8 @@ import { BuyForm } from './buy-form';
 
 export const dynamic = 'force-dynamic';
 
-export default async function BuyPage({ searchParams }: { searchParams: { customer_id?: string } }) {
+export default async function BuyPage({ searchParams }: { searchParams: Promise<{ customer_id?: string }> }) {
+    const query = await searchParams;
     const localCustomers = customers.list();
     let tariffs: any[] = [];
     let err: string | null = null;
@@ -24,7 +25,7 @@ export default async function BuyPage({ searchParams }: { searchParams: { custom
             <BuyForm
                 tariffs={tariffs}
                 customers={localCustomers}
-                defaultCustomerId={searchParams.customer_id}
+                defaultCustomerId={query.customer_id}
             />
         </main>
     );

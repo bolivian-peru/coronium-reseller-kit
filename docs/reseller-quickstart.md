@@ -24,34 +24,38 @@ This checks reachability, live stock, your key, balance, inventory, health and w
 
 Choose one:
 
-### A) Hosted dashboard (recommended)
+### A) Self-hosted operator dashboard
 
 ```bash
 git clone https://github.com/bolivian-peru/coronium-reseller-kit
 cd coronium-reseller-kit/examples/nextjs-dashboard
-cp .env.example .env  # paste your CORONIUM_API_KEY
-npm install && npm run dev
+cp .env.example .env  # set API key, operator login, webhook signing secret
+npm ci && npm run dev
 open http://localhost:3000
 ```
 
-Deploy to Vercel when ready:
+For production use a persistent writable volume, HTTPS and the companion
+`npm run worker` process. The local SQLite database cannot be used unchanged on
+an ephemeral serverless host. See the example's README.
 
-```bash
-vercel deploy
-```
+### B) API-only integration
 
-Then register your webhook URL (see step 4).
+You can integrate directly with the REST API. No reseller dashboard or SDK is
+required. Use Bearer auth server-side, fetch `GET /account` for the distinct
+account-credit/BTC/USDT balances, `GET /tariffs/available` for stock, and
+`POST /payment/renewal-quote` before an explicit renewal. The raw interactive
+API reference is <https://dashboard.coronium.io/api-docs/>.
 
-### B) Just the webhook (you already have a backend / CRM)
+### C) Just the webhook (you already have a backend / CRM)
 
 ```bash
 git clone https://github.com/bolivian-peru/coronium-reseller-kit
 cd coronium-reseller-kit/examples/webhook-receiver
 npm install
-CORONIUM_API_KEY=eyJ... node server.js
+CORONIUM_WEBHOOK_SECRET=<signing-secret-from-support> node server.js
 ```
 
-### C) AI-scaffolded custom dashboard
+### D) AI-scaffolded custom dashboard
 
 Paste `PROMPT.md` into Claude Code, Cursor, or Windsurf. The agent reads `AGENTS.md`, uses the Next.js example as foundation, builds your custom features.
 
@@ -75,16 +79,17 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
 
 The response contains the HTTP status your endpoint returned.
 
-Coronium POSTs `modem.replaced` to that URL with the new credentials when auto-swap happens. Process the event, update your CRM, email your customer the new URL. Your customer never knows the modem died. Remember the event fields live under `data`, and re-stamp metadata on the replacement.
+Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, re-stamp metadata and notify the customer of changed credentials. Handle `modem.dead` and `proxy.purchase_failed` as service incidents.
 
 ## 5. Buy your first proxy
 
-Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth) — the smoke test in step 2 prints the cheapest one in stock. Then, through the dashboard UI or curl:
+Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth). For PocketProxy include `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase. Then, with authorization to spend the reseller balance, buy through the dashboard UI or curl:
 
 ```bash
 curl -X POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance \
   -H "Authorization: Bearer $CORONIUM_API_KEY" \
   -H "Content-Type: application/json" \
+  -H "X-Coronium-Proxy-Credentials: separate-protocol-v1" \
   -H "Idempotency-Key: $(uuidgen)" \
   -d '{
     "tariff_id": "61ef075c5a33f238ac15a8e7",
@@ -97,7 +102,7 @@ It is `modemCount`, and `metadata` is a JSON string. Country and carrier come fr
 
 You get back `{result, charged_usd, currency, data:[{_id, http_port, socks_port, proxy_login, proxy_password, ext_ip, …}], billing}`. `data[0]` is your customer's proxy; `billing` itemizes what you were charged.
 
-If stock ran out between listing and buying, you get `500` with `error: "No free modems"` — pick another country rather than retrying.
+If stock ran out between listing and buying, the current balance lanes return `409 OUT_OF_STOCK`; ask the buyer to choose another available product.
 
 ## 6. Set up the customer-facing side
 
@@ -115,6 +120,6 @@ For end-customer auth, billing, and dashboard, you build that yourself on top of
      -H "Authorization: Bearer $CORONIUM_API_KEY"
    ```
    The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change — the call still returns 200, so always read that field.
-4. Wait. When that modem eventually fails a health check 5× in a row, Coronium will fire `modem.replaced` to your webhook with new credentials. Update your customer record, re-stamp the metadata, email the customer the new URL. They keep using the proxy with zero visible interruption.
+4. Where the provider supports auto-swap, a signed `modem.replaced` event carries the new connection details. Reconcile the mapping, re-stamp metadata and notify the customer. For providers without replacement capability, rely on health checks and your support workflow.
 
 That's the whole flywheel.

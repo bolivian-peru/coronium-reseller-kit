@@ -6,8 +6,8 @@
  * end-customer profile here and stamp `metadata.customer_id` on every modem
  * you buy on their behalf.
  *
- * Storage: SQLite via better-sqlite3 (single file, zero ops). Swap for
- * Vercel KV / Postgres / Upstash when you outgrow it.
+ * Storage: SQLite on a persistent writable disk. Do not deploy this unchanged
+ * to an ephemeral serverless filesystem.
  */
 import Database from 'better-sqlite3';
 import path from 'path';
@@ -38,8 +38,19 @@ db.exec(`
         raw          TEXT NOT NULL,
         received_at  INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS proxy_assignment (
+        modem_id    TEXT PRIMARY KEY,
+        customer_id TEXT NOT NULL,
+        metadata    TEXT NOT NULL,
+        updated_at  INTEGER NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_webhook_received_at ON webhook_event (received_at DESC);
 `);
+const eventColumns = new Set((db.pragma('table_info(webhook_event)') as Array<{ name: string }>).map(c => c.name));
+if (!eventColumns.has('event_id')) db.exec('ALTER TABLE webhook_event ADD COLUMN event_id TEXT');
+if (!eventColumns.has('state')) db.exec("ALTER TABLE webhook_event ADD COLUMN state TEXT NOT NULL DEFAULT 'pending'");
+if (!eventColumns.has('error')) db.exec('ALTER TABLE webhook_event ADD COLUMN error TEXT');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_webhook_event_id ON webhook_event(event_id)');
 
 export interface Customer {
     id: string;
@@ -77,25 +88,53 @@ export const customers = {
         });
     },
     delete(id: string) {
+        const assigned = db.prepare('SELECT 1 FROM proxy_assignment WHERE customer_id = ? LIMIT 1').get(id);
+        if (assigned) throw new Error('Customer has assigned proxies; reassign them before deleting the customer.');
         db.prepare('DELETE FROM customer WHERE id = ?').run(id);
     },
 };
 
 export const webhookEvents = {
     insert(raw: any) {
-        db.prepare(`
-            INSERT INTO webhook_event (event, old_modem_id, new_modem_id, reason, raw, received_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+        return db.prepare(`
+            INSERT OR IGNORE INTO webhook_event (event_id, event, old_modem_id, new_modem_id, reason, raw, received_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         `).run(
+            raw.event_id,
             raw?.event || 'unknown',
-            raw?.old_modem_id || null,
-            raw?.new_modem_id || null,
-            raw?.reason || null,
+            raw?.data?.old_modem_id || null,
+            raw?.data?.new_modem_id || null,
+            raw?.data?.reason || null,
             JSON.stringify(raw),
             Date.now()
-        );
+        ).changes > 0;
     },
     recent(limit = 50) {
-        return db.prepare('SELECT * FROM webhook_event ORDER BY received_at DESC LIMIT ?').all(limit);
+        return db.prepare('SELECT id, event_id, event, old_modem_id, new_modem_id, reason, received_at, state, error FROM webhook_event ORDER BY received_at DESC LIMIT ?').all(limit);
+    },
+    pending(limit = 25) {
+        return db.prepare("SELECT event_id, event, raw FROM webhook_event WHERE state = 'pending' AND event_id IS NOT NULL ORDER BY received_at ASC LIMIT ?").all(limit) as Array<{ event_id: string; event: string; raw: string }>;
+    },
+    mark(eventId: string, state: 'processed' | 'pending' | 'review', error: string | null = null) {
+        db.prepare('UPDATE webhook_event SET state = ?, error = ? WHERE event_id = ?').run(state, error, eventId);
+    },
+};
+
+export const assignments = {
+    get(modemId: string) {
+        return db.prepare('SELECT customer_id, metadata FROM proxy_assignment WHERE modem_id = ?').get(modemId) as
+            { customer_id: string; metadata: string } | undefined;
+    },
+    upsert(modemId: string, customerId: string, metadata: string) {
+        db.prepare(`INSERT INTO proxy_assignment (modem_id, customer_id, metadata, updated_at)
+            VALUES (?, ?, ?, ?) ON CONFLICT(modem_id) DO UPDATE SET
+            customer_id = excluded.customer_id, metadata = excluded.metadata, updated_at = excluded.updated_at`)
+            .run(modemId, customerId, metadata, Date.now());
+    },
+    replace(oldId: string, newId: string, customerId: string, metadata: string) {
+        db.transaction(() => {
+            this.upsert(newId, customerId, metadata);
+            db.prepare('DELETE FROM proxy_assignment WHERE modem_id = ?').run(oldId);
+        })();
     },
 };

@@ -30,6 +30,10 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
     const id = new URL(req.url).searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'id required' }, { status: 400 });
-    customers.delete(id);
-    return NextResponse.json({ ok: true });
+    try {
+        customers.delete(id);
+        return NextResponse.json({ ok: true });
+    } catch (error: any) {
+        return NextResponse.json({ error: error.message }, { status: 409 });
+    }
 }

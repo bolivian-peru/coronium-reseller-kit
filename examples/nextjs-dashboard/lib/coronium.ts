@@ -20,6 +20,7 @@ function headers() {
     return {
         'Authorization': `Bearer ${KEY}`,
         'Content-Type': 'application/json',
+        'X-Coronium-Proxy-Credentials': 'separate-protocol-v1',
     };
 }
 
@@ -67,7 +68,16 @@ export interface Proxy {
     country_id?: string;
     rotation_interval?: number;  // SECONDS between auto-rotations; 0 = disabled
     isOnline?: boolean;
+    carrier?: { _id: string; name: string; code?: string } | null;
+    proxyEndpoints?: {
+        provider: 'pocketproxy';
+        http?: Endpoint;
+        socks5?: Endpoint;
+        capabilities?: { autoRenew?: boolean; replace?: boolean; openvpn?: boolean; p0f?: boolean };
+    };
 }
+
+export interface Endpoint { host: string; port: number | string; username: string; password: string }
 
 export interface HealthRow {
     modem_id: string;
@@ -107,7 +117,7 @@ export interface BuyResult {
     result: 'ok';
     charged_usd: number;
     currency: 'USD';
-    data: Array<{ _id: string; name: string; ext_ip: string; http_port: string; socks_port: string; proxy_login: string; proxy_password: string; metadata?: string }>;
+    data: Proxy[];
     /** Itemized breakdown so you can reconcile the charge without a second call. */
     billing: {
         schema_version: number;
@@ -128,7 +138,6 @@ export interface BuyResult {
 export const coronium = {
     account: {
         get: () => call<any>('/account'),
-        balance: () => call<any>('/account/crypto-balance'),
     },
     proxies: {
         list: () => call<{ data: Proxy[] }>('/account/proxies'),
@@ -184,11 +193,12 @@ export const coronium = {
          * provisioning — and charging — a second time. Generate it once, at the
          * point the human clicks Buy, never per HTTP attempt.
          */
-        buyWithBalance: (
+        buy: (
             args: { tariff_id: string; modemCount: number; metadata?: Record<string, any> },
-            idempotencyKey?: string
+            lane: 'account_credit' | 'crypto_btc',
+            idempotencyKey: string
         ) =>
-            call<BuyResult>('/payment/buy-modems-with-crypto-balance', {
+            call<BuyResult>(lane === 'account_credit' ? '/payment/buy-with-account-credit' : '/payment/buy-modems-with-crypto-balance', {
                 method: 'POST',
                 // metadata is a String column server-side — send it pre-stringified
                 // so it round-trips as the same JSON you sent.
@@ -197,7 +207,16 @@ export const coronium = {
                     modemCount: args.modemCount,
                     ...(args.metadata ? { metadata: JSON.stringify(args.metadata) } : {}),
                 }),
-                headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {},
+                headers: { 'Idempotency-Key': idempotencyKey },
+            }),
+        renewalQuote: (modemId: string, days: number) =>
+            call<{ currency: 'USD'; total_usd: number; total_cents: number; line_items: any[] }>('/payment/renewal-quote', {
+                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }] }),
+            }),
+        renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string) =>
+            call<BuyResult>(lane === 'account_credit' ? '/payment/renew-with-account-credit' : '/payment/renew-modems-with-crypto-balance', {
+                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }] }),
+                headers: { 'Idempotency-Key': idempotencyKey },
             }),
     },
     webhook: {

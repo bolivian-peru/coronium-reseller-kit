@@ -1,6 +1,6 @@
 # Customer mapping via the `metadata` field
 
-How to track which Coronium modem belongs to which of your end-customers — without a sidecar database that drifts out of sync.
+How to track which Coronium modem belongs to each end-customer, including after an auto-swap.
 
 ## The mechanism
 
@@ -36,9 +36,9 @@ GET /api/v3/account/proxies
 
 Note: `metadata` comes back as a JSON string, not a parsed object. JSON-parse it on your side.
 
-## Why this beats a sidecar database
+## Why metadata remains the primary mapping
 
-If you stored "modem 69b5… belongs to acme-007" only in your own Postgres table, you'd need to keep it in sync across:
+If you stored "modem 69b5… belongs to acme-007" only in your own database, you'd need to keep it in sync across:
 
 - Renewals (creates a new payment row, but modem_id stays — you don't strictly need to update, but easy to mishandle)
 - Refunds (modem deleted on Coronium side — your table would have a dangling row)
@@ -57,7 +57,7 @@ Handle it in your `modem.replaced` webhook:
 await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
 ```
 
-Because of this, keep a **minimal** local record of `customer_id → current modem_id` as your durable link, and treat metadata as the convenient denormalized copy that makes `/account/proxies` self-describing. That local record is also what lets you find the customer from `old_modem_id` when the swap event arrives.
+Because of this, keep a **minimal durable** `old_modem_id → customer_id + metadata` index and a signed webhook inbox. Backfill the index from current proxy metadata before an existing account begins receiving swap events. Treat metadata as the primary self-describing mapping, and the index as recovery state when the old modem disappears before the event is processed.
 
 ## What to put in metadata
 

@@ -8,15 +8,15 @@ Mobile modems fail. Phones overheat, SIMs deactivate, carrier networks reroute, 
 
 With the Coronium webhook flow:
 
-1. Coronium's `CustomerModemHealthChecker` detects a modem with 5+ consecutive failed health checks AND remaining paid time
-2. Coronium auto-provisions a same-country, same-carrier replacement (carrier-matched first, country-only fallback)
+1. Coronium detects an eligible failed modem with remaining paid time
+2. If the provider and stock support replacement, Coronium provisions a replacement
 3. The original `tariff_expired_at` is transferred — your customer doesn't lose paid time
 4. The old modem is quarantined to a system bucket
 5. Coronium POSTs an event to your webhook URL with old + new modem IDs and full credentials
 6. Your handler updates the customer's record with the new credentials
-7. You email or notify the customer
+7. You notify the customer that credentials have changed
 
-All within ~45 minutes of the first failed health check (P95).
+This is conditional on provider capability and available stock. Do not promise a fixed recovery time.
 
 ## Registering your webhook URL
 
@@ -26,10 +26,10 @@ One-time setup per Coronium account:
 curl -X PUT https://api.coronium.io/api/v3/account/webhook \
   -H "Authorization: Bearer $CORONIUM_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"webhook_url":"https://your-host/api/coronium/webhook?key=<your-secret>"}'
+  -d '{"webhook_url":"https://your-host/api/coronium/webhook"}'
 ```
 
-`webhook_url` must be **HTTPS** (HTTP returns 400). Max length 500 chars. Path / query string is freeform — use it for shared secrets or routing. The target must be a public host: internal, private and non-resolving addresses are rejected with `code: "invalid_webhook_target"`.
+`webhook_url` must be **HTTPS** (HTTP returns 400). Max length 500 chars. The target must be a public host: internal, private and non-resolving addresses are rejected with `code: "invalid_webhook_target"`. Use the HMAC signature for authentication, not a secret in the URL.
 
 Disable later with `{"webhook_url": null}`.
 
@@ -109,6 +109,7 @@ The replacement carries the remaining paid time — but **not** the original's `
 |---|---|
 | `proxy.purchased` | `{order_id, amount_usd, provider, days, count, proxies[]}` |
 | `proxy.renewed` | same as purchased |
+| `proxy.purchase_failed` | `{order_id, amount_usd, requested, reason_code, reason, retryable, retry_after_seconds, refund}`; inspect the refund receipt before any retry |
 | `proxy.expired` | `{proxy}` |
 | `deposit.confirmed` | `{amount_usd, provider, external_id}` — a balance top-up cleared |
 | `webhook.test` | `{message}` — only from the test endpoint |
@@ -145,7 +146,7 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
 - **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried.
 - **Redirects are not followed.** Register the final URL.
 - **Cooldown per modem** on the dead-modem path — you won't get two swap events for the same modem back-to-back.
-- **No ordering guarantee.** Use `occurred_at` (ISO 8601) to resolve out-of-order delivery; the latest wins.
+- **No ordering guarantee.** Use `occurred_at` and fresh proxy state before changing customer assignments.
 
 ## Verifying the signature
 
@@ -174,14 +175,12 @@ app.post('/api/coronium/webhook', async (req, res) => {
         return res.sendStatus(401);
     }
 
-    // 2. ACK FAST. Don't block on processing — a slow 200 is retried.
+    // 2. Commit the event to a durable inbox keyed by event_id.
+    // Return non-2xx if storage fails; Coronium will retry.
+    await persistRaw(req.body);
     res.sendStatus(200);
 
-    // 3. Persist the raw event (replay safety)
-    await persistRaw(req.body);
-
-    // 4. Process async — never re-throw inside this handler
-    queueMicrotask(() => process(req.body).catch(logErr));
+    // 3. A separate worker processes pending events and records outcomes.
 });
 
 async function process(evt) {
@@ -251,25 +250,7 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
   -H "Authorization: Bearer $CORONIUM_API_KEY"
 ```
 
-To exercise your handler's branches offline, POST a fake event yourself — note the `data` nesting:
-
-```bash
-curl -X POST http://localhost:3000/api/coronium/webhook \
-  -H "Content-Type: application/json" \
-  -d '{
-    "event_id": "local-test-1",
-    "event": "modem.replaced",
-    "occurred_at": "2026-07-25T08:34:53.000Z",
-    "account": { "user_id": "test", "email": "you@example.com" },
-    "data": {
-      "old_modem_id": "test-old",
-      "new_modem_id": "test-new",
-      "new_modem": { "host": "test", "http_port": "8000", "socks_port": "5000", "proxy_login": "u", "proxy_password": "p", "tariff_expired_at": 9999999999, "isOnline": true }
-    }
-  }'
-```
-
-Leave your signing secret unset locally, or this unsigned request is correctly rejected with 401.
+For offline branch tests, use a synthetic envelope with event-specific fields under `data` and an HMAC signature over the exact raw JSON bytes. The receiver correctly rejects unsigned test events.
 
 ## When the webhook is NOT enough
 

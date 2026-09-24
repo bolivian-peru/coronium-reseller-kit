@@ -13,26 +13,25 @@ You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G
 1. This file (`AGENTS.md`) — orientation + hard rules
 2. `examples/nextjs-dashboard/` — copy-paste foundation
 3. `docs/webhook-integration.md` — the auto-swap event flow
-4. `docs/metadata-strategy.md` — how to map Coronium modems to the reseller's end-customers without a separate database
+4. `docs/metadata-strategy.md` — metadata plus the durable local mapping needed for swaps
 5. Coronium reseller API — authoritative interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
 
 ## The minimum-viable reseller dashboard has six features
 
 When the user asks for a dashboard, deliver these. Anything beyond is bonus.
 
-1. **API key setup** — page where the reseller pastes their `CORONIUM_API_KEY` (we won't see it; their dashboard talks to Coronium server-side)
+1. **API key setup** — read the key from a server-side environment variable; protect the operator dashboard before hosting it
 2. **Proxy inventory** — list all proxies the reseller has bought, grouped by their `metadata.customer_id`
 3. **Buy proxies** — form to buy N proxies in a chosen country/carrier and attach them to a chosen end-customer (writes `metadata.customer_id`)
 4. **Webhook endpoint** — POST handler at `/api/coronium/webhook` that processes `modem.replaced` and `modem.dead` events
-5. **End-customer view** — page per end-customer showing their proxies, with copy-button for credentials
+5. **Customer record view for the operator** — page per end-customer showing assigned proxies and separate HTTP/SOCKS5 credentials. A public end-customer portal needs its own tenant authentication.
 6. **Health check** — call `/account/proxies/health` and surface dead proxies before the end-customer hits them
 
 ## Hard rules — do not violate
 
-**Renewals: filter on `carrier._id`, never country alone.** Coronium bills a renewal against
-that modem's OWN tariff. Every proxy carries `carrier: {_id, name, code}` — if you offer the
-cheapest same-country plan across all carriers you WILL quote below cost (a $99/mo France Free
-modem priced at the $79/mo LycaMobile rate is a real incident, 2026-07-27).
+**Renewals: call `POST /payment/renewal-quote` for the exact owned modem and term.**
+Do not estimate from a country or carrier tariff. Explicit renewal exists on account-credit
+and BTC lanes; provider auto-renew capability varies by proxy.
 
 **Reconcile from the response, not from a second call.** `billing.subtotal_usd` is the price
 before coupon, `billing.charged_usd` after, `billing.discount.amount_usd` the delta, and they
@@ -42,15 +41,17 @@ tie out to the cent. See docs/billing-and-reconciliation.md.
 arrive and your fulfilment flow must poll instead of wait.
 
 1. **Never put `CORONIUM_API_KEY` in client-side code.** All API calls must go through server routes (Next.js `app/api/...`, or Express/Fastify proxy). The dashboard is hosted by the reseller; their token must not leak to browsers.
-2. **Use the `metadata` field for customer mapping.** Do NOT create a separate Postgres table to track which Coronium modem belongs to which of the reseller's customers. The `metadata` field on every Modem is freeform JSON, returned in every list, persistent across rotations. Sidecar databases drift out of sync.
+2. **Use `metadata.customer_id` for customer mapping and a small durable local recovery index.** Metadata is returned in proxy lists but is not inherited by replacements. Keep old modem ID → customer ID until a swap is reconciled.
 3. **Register the webhook URL via `PUT /api/v3/account/webhook` exactly once on first deploy.** Don't re-PUT every request. Store the registration in the reseller's own state (config file, env, KV) so you know when it's already configured.
 4. **Authenticate via Bearer header** for any new code you write. `?auth_token=` query-param also works but logs to access.log everywhere; Bearer is the right pattern.
-5. **Stock-out is normal.** `POST /payment/buy-modems-with-crypto-balance` fails when we have no inventory in that country/carrier right now. It currently surfaces as **`500` with `error: "No free modems"`** — there is no `409 stock_unavailable`. Match on the message, surface it clearly, don't retry-loop.
+5. **Stock-out is normal.** Current balance-purchase lanes return `409 OUT_OF_STOCK` with `error: "No free modems"`. Surface it clearly; do not retry-loop.
 6. **Idempotency** — `/payment/*` POSTs accept an `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, 24h window; a replay answers with `X-Idempotency-Replay: true`). Generate ONE UUID per buy *intent* — at the moment the human confirms — and resend that same key on every retry. A key derived from a timestamp changes between attempts and buys twice.
-7. **Don't reinvent the auto-swap logic.** The backend does it. You receive `modem.replaced` events; the fields are under `data` (`data.old_modem_id`, `data.new_modem_id`, `data.new_modem`). Update your local mapping, re-stamp the metadata, ack 200.
+7. **Handle auto-swap only where supported.** Fields are under `data`. Verify HMAC, persist the event, ack within 5 seconds, then re-stamp the replacement's metadata and notify your customer. PocketProxy's current capabilities do not advertise replacement.
 8. **Rotation is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** — branch on `rotated`, never on the status code. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
 9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 — a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
 10. **`metadata` is a JSON string, and it is NOT inherited by auto-swap replacements.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamp the new modem with `PUT /modems/{new_modem_id}/set-metadata` or that proxy is permanently unattributed.
+11. **PocketProxy is opt-in.** Send `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase calls. Use `proxyEndpoints.http` and `.socks5` independently; legacy credentials describe HTTP only.
+12. **Keep the dashboard private.** The operator sample requires Basic auth and persistent SQLite. It is not a public end-customer login or a serverless one-command deploy.
 
 ## Architecture you should produce
 
@@ -67,7 +68,7 @@ reseller-dashboard/
         [...path]/route.ts   # Server-side proxy to Coronium API (keeps JWT off the client)
         webhook/route.ts     # POST handler for modem.replaced + modem.dead events
   lib/
-    coronium.ts              # Typed client wrapper around Coronium REST (or use `coronium-sdk` package)
+    coronium.ts              # Typed client wrapper around Coronium REST
     customers.ts             # Local model of end-customers (KV / SQLite / JSON file)
   README.md
   .env.example
@@ -94,7 +95,7 @@ type Customer = {
 };
 ```
 
-The proxies themselves stay in Coronium. The reseller's DB only holds end-customer profiles. Mapping happens via `metadata.customer_id` on each modem.
+The proxies themselves stay in Coronium. The reseller's DB holds end-customer profiles, a small mapping index for swaps, and a durable signed-event inbox.
 
 ## Webhook contract (the most important section)
 
@@ -150,8 +151,8 @@ You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore 
 **Handler must:**
 
 1. Verify `X-Coronium-Signature` (`sha256=<hmac-sha256 of the RAW body>`) against the account's signing secret, over the raw bytes — not the re-serialized JSON
-2. `res.sendStatus(200)` fast (ack within the 5s timeout)
-3. Then process: update mapping `data.old_modem_id → data.new_modem_id`, **re-stamp metadata on the new modem**, notify your end-customer with new credentials, log event
+2. Persist the event keyed by `event_id`, then acknowledge within the 5s timeout. Return non-2xx if storage fails.
+3. Process from the durable inbox: update mapping `data.old_modem_id → data.new_modem_id`, **re-stamp metadata on the new modem**, notify your end-customer with new credentials
 4. Be idempotent, keyed on `event_id` — a non-2xx is retried up to 8 times with backoff, and Coronium can replay dead-lettered events
 
 ## Hard-coded values worth knowing
@@ -181,8 +182,8 @@ Common requests and the right answer:
 | Symptom | What it means | What to do |
 |---|---|---|
 | `401 Unauthorized` on any call | API key invalid or expired | Show "reauthorize" UI; user pastes a fresh key |
-| `500` + `error: "No free modems"` on buy | No proxies in that country/carrier right now | Show "try different country" UX, don't retry-loop |
-| `500` + `error: "Bad modem count"` | You sent `modem_count`/`count`, or a non-positive number | The field is `modemCount` |
+| `409 OUT_OF_STOCK` on buy | No eligible proxy for that tariff now | Ask buyer to choose another product; don't retry-loop |
+| `400 BAD_MODEM_COUNT` | You sent `modem_count`/`count`, or a non-positive number | The field is `modemCount` |
 | `400` on set-rotation-interval | Value between 1 and 59 | The unit is SECONDS; minimum 60, or 0 to disable |
 | `200` with `rotated: false` | Rotation ran but the IP did not change | Retry after a few seconds; if it persists, `/replace` the modem |
 | `429` on rotate-by-token | Inside the ~60 s per-modem cooldown | Back off; don't hammer |
@@ -196,8 +197,8 @@ Common requests and the right answer:
 Show the user:
 
 1. **Local URL** to open in their browser
-2. **Deploy command** for their preferred host (Vercel: `vercel deploy`; Railway: `railway up`; Docker: provide Dockerfile)
+2. **Deploy command** for a persistent host. If using serverless, first replace the local SQLite store with a durable shared database.
 3. **Webhook registration command** — the one-liner curl or fetch to PUT their dashboard URL into Coronium
-4. **A test purchase** — buy one cheap proxy from the dashboard against their actual API key, show the credentials in their UI, prove the loop works end-to-end
+4. **An authorized test purchase** — with the account owner's permission and funding, show credentials in the UI and prove the proxy connects. Never silently spend their balance.
 
 Don't claim "done" until the test purchase succeeded and the proxy is visible in the reseller's UI.

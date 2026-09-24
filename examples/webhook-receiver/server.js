@@ -7,23 +7,22 @@
  * Run it:
  *
  *   npm install
- *   CORONIUM_API_KEY=eyJ... WEBHOOK_SECRET=$(openssl rand -hex 32) \
- *     CORONIUM_WEBHOOK_SECRET=<ask support> node server.js
+ *   CORONIUM_WEBHOOK_SECRET=<ask support> node server.js
  *
  * Then register your URL with Coronium:
  *
  *   curl -X PUT https://api.coronium.io/api/v3/account/webhook \
  *     -H "Authorization: Bearer $CORONIUM_API_KEY" \
  *     -H "Content-Type: application/json" \
- *     -d "{\"webhook_url\":\"https://your.host/coronium/webhook?key=$WEBHOOK_SECRET\"}"
+ *     -d "{\"webhook_url\":\"https://your.host/coronium/webhook\"}"
  *
- * That's it. Event log streams to stdout; replace `processEvent` with your
- * CRM/Stripe-metadata/email logic.
+ * This accepts events into a durable JSONL inbox. Wire your own idempotent
+ * CRM worker before promising automatic customer notifications.
  */
 
 import express from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
-import { writeFileSync, appendFileSync, existsSync } from 'fs';
+import { openSync, writeSync, fsyncSync, readFileSync, closeSync } from 'fs';
 
 const app = express();
 // Keep the RAW bytes: the HMAC is computed over exactly what we received, and
@@ -31,11 +30,16 @@ const app = express();
 app.use(express.json({ limit: '64kb', verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 const PORT = process.env.PORT || 3001;
-const SECRET = process.env.WEBHOOK_SECRET || '';
 const SIGNING_SECRET = process.env.CORONIUM_WEBHOOK_SECRET || '';
 const LOG_FILE = process.env.LOG_FILE || './coronium-events.log';
 
-if (!existsSync(LOG_FILE)) writeFileSync(LOG_FILE, '');
+if (!SIGNING_SECRET) throw new Error('CORONIUM_WEBHOOK_SECRET is required');
+const seen = new Set();
+const log = openSync(LOG_FILE, 'a+');
+for (const line of readFileSync(LOG_FILE, 'utf8').split('\n')) {
+    if (!line) continue;
+    try { seen.add(JSON.parse(line).event_id); } catch { /* Incomplete tail after an interrupted write. */ }
+}
 
 function signatureMatches(raw, secret, header) {
     if (!header) return false;
@@ -46,32 +50,31 @@ function signatureMatches(raw, secret, header) {
 }
 
 app.post('/coronium/webhook', (req, res) => {
-    // Optional shared-secret check
-    if (SECRET) {
-        const got = req.query.key;
-        if (got !== SECRET) {
-            console.warn('[webhook] rejected: bad/missing ?key=');
-            return res.status(403).send('forbidden');
-        }
-    }
-
     // Cryptographic check — proves the POST really came from Coronium.
-    if (SIGNING_SECRET && !signatureMatches(req.rawBody || Buffer.alloc(0), SIGNING_SECRET, req.get('x-coronium-signature'))) {
+    if (!signatureMatches(req.rawBody || Buffer.alloc(0), SIGNING_SECRET, req.get('x-coronium-signature'))) {
         console.warn('[webhook] rejected: bad X-Coronium-Signature');
         return res.status(401).send('bad signature');
     }
 
     const body = req.body || {};
-    if (!body.event) return res.status(400).send('bad request');
+    if (typeof body.event_id !== 'string' || !body.event_id || typeof body.event !== 'string' || !body.data) {
+        return res.status(400).send('bad request');
+    }
+    if (seen.has(body.event_id)) return res.json({ ok: true, duplicate: true });
 
-    // Ack first — delivery times out after 5s. A non-2xx is retried (up to 8
-    // attempts with backoff), so dedupe on body.event_id before acting.
+    try {
+        // Acknowledge only after the event reaches durable storage.
+        writeSync(log, JSON.stringify({ received_at: Date.now(), ...body }) + '\n');
+        fsyncSync(log);
+        seen.add(body.event_id);
+    } catch (error) {
+        console.error('[webhook] event persistence failed:', error);
+        return res.status(503).send('event not stored');
+    }
     res.json({ ok: true });
 
-    // Persist raw event before any processing so we can replay if logic breaks.
-    appendFileSync(LOG_FILE, JSON.stringify({ ts: Date.now(), ...body }) + '\n');
-
-    // Process async
+    // This is an inbox example. Your CRM worker must process/replay the log;
+    // the sample logger below does not update customers or claim delivery.
     setImmediate(() => processEvent(body).catch((e) => console.error('[webhook] err:', e)));
 });
 
@@ -79,8 +82,10 @@ app.get('/healthz', (_req, res) => res.send('ok'));
 
 app.listen(PORT, () => {
     console.log(`[webhook] listening on :${PORT}`);
-    console.log(`[webhook] register URL: http://<your-host>:${PORT}/coronium/webhook${SECRET ? `?key=${SECRET}` : ''}`);
+    console.log(`[webhook] expose /coronium/webhook through HTTPS on your public host`);
 });
+
+process.on('SIGTERM', () => { closeSync(log); process.exit(0); });
 
 // ─── Your business logic goes here ──────────────────────────────────────
 async function processEvent(body) {

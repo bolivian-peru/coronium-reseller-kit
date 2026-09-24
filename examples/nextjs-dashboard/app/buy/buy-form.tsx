@@ -27,6 +27,7 @@ export function BuyForm({
     const [customer_id, setCustomerId] = useState(defaultCustomerId || '');
     const [count, setCount] = useState(1);
     const [tag, setTag] = useState('');
+    const [lane, setLane] = useState<'account_credit' | 'crypto_btc'>('account_credit');
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<any>(null);
     const [err, setErr] = useState<string | null>(null);
@@ -45,17 +46,30 @@ export function BuyForm({
         setBusy(true);
         setErr(null);
         setResult(null);
-        // One idempotency key per click. If this request is retried, the same
-        // key returns the original result instead of buying (and billing) twice.
-        const idempotency_key = crypto.randomUUID();
+        const payload = { tariff_id, modemCount: count, customer_id, tag: tag || null, lane };
+        const serialized = JSON.stringify(payload);
+        const storageKey = `coronium-pending-buy:${serialized}`;
+        let intent: { key: string; createdAt: number } | null = null;
+        try { intent = JSON.parse(sessionStorage.getItem(storageKey) || 'null'); } catch { /* stale storage */ }
+        if (intent && Date.now() - intent.createdAt > 23 * 60 * 60 * 1000) {
+            setErr('This order is older than the API replay window. Check Coronium payments and assigned proxies before starting a new order.');
+            setBusy(false);
+            return;
+        }
+        if (!intent) {
+            intent = { key: crypto.randomUUID(), createdAt: Date.now() };
+            sessionStorage.setItem(storageKey, JSON.stringify(intent));
+        }
         try {
             const r = await fetch('/api/coronium/buy', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ tariff_id, modemCount: count, customer_id, tag: tag || null, idempotency_key }),
+                body: JSON.stringify({ ...payload, idempotency_key: intent.key }),
             });
             const body = await r.json();
+            if (r.status === 202) throw new Error(body?.error || 'Purchase status is uncertain; check the account before retrying.');
             if (!r.ok) throw new Error(body?.error || `Failed (${r.status})`);
+            sessionStorage.removeItem(storageKey);
             setResult(body);
         } catch (e: any) {
             setErr(e.message);
@@ -117,14 +131,22 @@ export function BuyForm({
                     <input className="input" placeholder="eg tiktok-batch, april-campaign" value={tag} onChange={(e) => setTag(e.target.value)} />
                 </label>
 
+                <label className="flex flex-col gap-1">
+                    <span className="text-xs uppercase text-zinc-400 tracking-wide">Funding</span>
+                    <select className="input" value={lane} onChange={(e) => setLane(e.target.value as typeof lane)}>
+                        <option value="account_credit">Account credit (USD)</option>
+                        <option value="crypto_btc">BTC wallet</option>
+                    </select>
+                </label>
+
                 {selectedTariff && (
                     <div className="md:col-span-2 text-sm text-zinc-400">
-                        Total wholesale: <strong className="text-zinc-100">${(selectedTariff.price * count).toFixed(2)}</strong> · charged to your Coronium balance
+                        Estimated wholesale: <strong className="text-zinc-100">${(selectedTariff.price * count).toFixed(2)}</strong> · final charge is confirmed by Coronium
                     </div>
                 )}
 
                 <div className="md:col-span-2 flex items-center justify-between">
-                    {err && <span className="text-red-400 text-sm">{err}</span>}
+                    {err && <span className="text-red-400 text-sm">{err} Retry with the same selection to check the original order before starting another.</span>}
                     <button className="btn" type="submit" disabled={busy || !tariff_id || !customer_id}>
                         {busy ? 'Buying…' : `Buy ${count} proxy${count === 1 ? '' : 'ies'}`}
                     </button>

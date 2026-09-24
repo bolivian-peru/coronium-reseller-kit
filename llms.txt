@@ -17,9 +17,14 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 ## API endpoints you'll use
 
 - `GET https://api.coronium.io/api/v3/account/proxies` — list owned proxies
+- `GET https://api.coronium.io/api/v3/account` — account credit, BTC and USDT balances
 - `GET https://api.coronium.io/api/v3/account/proxies/health` — per-proxy liveness
 - `GET https://api.coronium.io/api/v3/tariffs/available` — in-stock tariffs (public, no auth — use it to smoke-test connectivity)
 - `POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance` — buy proxies. Body: `{tariff_id, modemCount, metadata}`. It is `modemCount`, NOT `modem_count`. Country/carrier come from the tariff.
+- `POST https://api.coronium.io/api/v3/payment/buy-with-account-credit` — buy with USD credit
+- `POST https://api.coronium.io/api/v3/payment/renewal-quote` — read-only exact renewal quote
+- `POST https://api.coronium.io/api/v3/payment/renew-with-account-credit` — explicit renewal with USD credit
+- `POST https://api.coronium.io/api/v3/payment/renew-modems-with-crypto-balance` — explicit renewal with BTC balance
 - `POST https://api.coronium.io/api/v3/modems/{id}/restart` — rotate IP. SYNCHRONOUS. Always `200` with `{result, rotated, ip, message}` — `rotated:false` is a failure returned as 200. There is no `?sync=true`, no `new_ip`, no 503.
 - `GET https://api.coronium.io/api/v3/modems/rotate-modem-by-token/{token}` — token-auth rotation. `200` only on a verified new IP (`ext_ip`/`new_ip`), `502` otherwise (branch on the HTTP status, not on a body error code), `429` during the ~60 s per-modem cooldown.
 - `PUT https://api.coronium.io/api/v3/modems/{id}/set-rotation-interval` — `{rotation_interval: <SECONDS>}`, minimum 60, 0 disables. Minutes are rejected with 400.
@@ -38,6 +43,7 @@ Errors on `/api/v3` return `{error, code, suggested_action, request_id}` plus an
 - **Server-side JWT**: never put `CORONIUM_API_KEY` in client-side code. All API calls go through the reseller's own server.
 - **Webhook auto-swap**: when a customer's modem dies, Coronium fires `modem.replaced` to the reseller's webhook URL. Fields are nested under `data` (`data.old_modem_id`, `data.new_modem`), the envelope carries `event_id`/`occurred_at`/`account`. Deliveries are HMAC-signed (`X-Coronium-Signature`) and retried up to 8 times.
 - **Idempotency**: `Idempotency-Key` header on `/payment/*` POSTs, `[A-Za-z0-9_-]{8,128}`, 24h replay window. One key per buy intent, reused across retries.
+- **PocketProxy**: send `X-Coronium-Proxy-Credentials: separate-protocol-v1` for stock and purchase. Read separate `proxyEndpoints.http` and `.socks5`; never reuse HTTP credentials for SOCKS5.
 
 ## Don't
 
@@ -46,4 +52,4 @@ Errors on `/api/v3` return `{error, code, suggested_action, request_id}` plus an
 - Don't treat a 200 from `/restart` as a successful rotation — check `rotated`.
 - Don't read webhook fields off the top level — they are under `data`.
 - Don't document or depend on `proxy.expiring_soon`; the API advertises it but it never fires.
-- Don't retry-loop on a stock-out. It surfaces as `500` with `error: "No free modems"` (there is no `409 stock_unavailable`) — pick a different country instead.
+- Don't retry-loop on `409 OUT_OF_STOCK`. Ask the buyer to choose another available product.

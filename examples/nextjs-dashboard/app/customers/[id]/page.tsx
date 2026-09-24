@@ -2,11 +2,13 @@ import Link from 'next/link';
 import { coronium, parseMetadata, Proxy, HealthRow } from '@/lib/coronium';
 import { customers } from '@/lib/customers';
 import { notFound } from 'next/navigation';
+import { RenewForm } from './renew-form';
 
 export const dynamic = 'force-dynamic';
 
-export default async function CustomerPage({ params }: { params: { id: string } }) {
-    const customer = customers.get(params.id);
+export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
+    const { id } = await params;
+    const customer = customers.get(id);
     if (!customer) notFound();
 
     let proxies: Proxy[] = [];
@@ -19,7 +21,7 @@ export default async function CustomerPage({ params }: { params: { id: string } 
             coronium.proxies.health().catch(() => ({ modems: [] as HealthRow[] } as any)),
         ]);
         proxies = (proxiesRes.data || []).filter(
-            (p) => parseMetadata(p.metadata).customer_id === params.id
+            (p) => parseMetadata(p.metadata).customer_id === id
         );
         for (const h of healthRes?.modems || []) healthByModem.set(h.modem_id, h);
     } catch (e: any) {
@@ -59,18 +61,30 @@ export default async function CustomerPage({ params }: { params: { id: string } 
                                 <th className="py-1.5">Credentials</th>
                                 <th className="py-1.5">Status</th>
                                 <th className="py-1.5">Expires</th>
+                                <th className="py-1.5">Renew</th>
                             </tr>
                         </thead>
                         <tbody>
                             {proxies.map((p) => {
                                 const h = healthByModem.get(p._id);
-                                const connectionHost = p.connection_ip || p.ip_address || p.ext_ip;
-                                const proxyUrl = `http://${p.proxy_login}:${p.proxy_password}@${connectionHost}:${p.http_port}`;
+                                const http = p.proxyEndpoints?.http || {
+                                    host: p.connection_ip || p.ip_address || '', port: p.http_port,
+                                    username: p.proxy_login, password: p.proxy_password,
+                                };
+                                const socks = p.proxyEndpoints?.socks5 || {
+                                    host: p.connection_ip || p.ip_address || '', port: p.socks_port,
+                                    username: p.proxy_login, password: p.proxy_password,
+                                };
                                 return (
                                     <tr key={p._id} className="border-t border-zinc-800">
                                         <td className="py-2 font-mono text-xs">{p.name}</td>
-                                        <td className="py-2 font-mono text-xs text-zinc-400">{connectionHost}:{p.http_port}/{p.socks_port}</td>
-                                        <td className="py-2 font-mono text-xs text-zinc-400">{p.proxy_login}:{p.proxy_password}</td>
+                                        <td className="py-2 font-mono text-xs text-zinc-400">
+                                            <div>HTTP {http.host}:{http.port}</div><div>SOCKS5 {socks.host}:{socks.port}</div>
+                                        </td>
+                                        <td className="py-2 font-mono text-xs text-zinc-400">
+                                            <div>HTTP user: {http.username} · password: {http.password}</div>
+                                            <div>SOCKS5 user: {socks.username} · password: {socks.password}</div>
+                                        </td>
                                         <td className="py-2">
                                             {h
                                                 ? <span className={`badge ${h.status === 'active' ? 'badge-success' : h.status === 'degraded' ? 'badge-warn' : 'badge-danger'}`}>{h.status}</span>
@@ -79,6 +93,7 @@ export default async function CustomerPage({ params }: { params: { id: string } 
                                         <td className="py-2 text-xs text-zinc-400">
                                             {p.tariff_expired_at ? new Date(p.tariff_expired_at).toISOString().slice(0, 10) : '—'}
                                         </td>
+                                        <td className="py-2"><RenewForm modemId={p._id} customerId={customer.id} /></td>
                                     </tr>
                                 );
                             })}

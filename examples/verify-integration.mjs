@@ -27,7 +27,8 @@ const note = (msg) => console.log(`        ${msg}`);
 async function call(path, init) {
     const r = await fetch(`${BASE}${path}`, {
         ...init,
-        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', ...(init?.headers || {}) },
+        headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json',
+            'X-Coronium-Proxy-Credentials': 'separate-protocol-v1', ...(init?.headers || {}) },
     });
     const text = await r.text();
     let body = null;
@@ -79,7 +80,7 @@ async function main() {
     console.log('\n2. Authentication');
     const account = await call('/account');
     if (account.status === 200) {
-        ok(`key accepted${account.body?.email ? ` — ${account.body.email}` : ''}`);
+        ok(`key accepted${account.body?.login ? ` — ${account.body.login}` : ''}`);
     } else {
         bad(`key rejected — ${describeError(account)}`);
         note('Copy a fresh JWT from dashboard.coronium.io → Settings → API.');
@@ -87,11 +88,11 @@ async function main() {
 
     // 3. Spending power — a valid key with an empty balance still cannot buy.
     console.log('\n3. Balance');
-    const balance = await call('/account/crypto-balance');
-    if (balance.status === 200) {
-        ok(`balance readable: ${JSON.stringify(balance.body)}`);
+    if (account.status === 200) {
+        ok(`account credit: $${account.body?.accountCredit ?? 0}; BTC and USDT balances available separately`);
+        note(`BTC: ${account.body?.btc?.balance ?? 0}; USDT: ${account.body?.usdt?.balance ?? 0}`);
     } else {
-        bad(`cannot read balance — ${describeError(balance)}`);
+        bad('cannot read balances until account authentication succeeds');
     }
 
     // 4. Inventory + how it maps to your customers.
@@ -128,7 +129,8 @@ async function main() {
     if (webhook.status !== 200) {
         bad(`cannot read webhook config — ${describeError(webhook)}`);
     } else if (webhook.body?.webhook_url) {
-        ok(`registered: ${webhook.body.webhook_url}`);
+        const url = new URL(webhook.body.webhook_url);
+        ok(`registered: ${url.origin}${url.pathname}`);
         if (RUN_WEBHOOK_TEST) {
             const test = await call('/account/webhook/test', { method: 'POST' });
             if (test.status === 200) {
@@ -146,7 +148,7 @@ async function main() {
 
     console.log(
         failures === 0
-            ? '\n\x1b[32mAll checks passed.\x1b[0m You are ready to buy: POST /payment/buy-modems-with-crypto-balance {tariff_id, modemCount}\n'
+            ? '\n\x1b[32mAll checks passed.\x1b[0m Use account credit or BTC to buy. Keep the same Idempotency-Key on retries.\n'
             : `\n\x1b[31m${failures} check(s) failed.\x1b[0m See the notes above.\n`
     );
     process.exit(failures === 0 ? 0 : 1);
