@@ -71,6 +71,8 @@ Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.c
 
 For PocketProxy inventory and purchases, also send `X-Coronium-Proxy-Credentials: separate-protocol-v1`. This opts your client into **separate** `proxyEndpoints.http` and `proxyEndpoints.socks5` credentials. The legacy login/password fields describe HTTP only. Check each proxy's capabilities; PocketProxy customer auto-renew and replacement are not advertised. Its billing coverage date is not a customer rental deadline.
 
+**Missing stock compared with the dashboard?** Read [stock and credential negotiation](docs/stock-and-credentials.md) for the exact header, term selection, cache rules and protocol credentials.
+
 Confirm your key works before writing any code:
 
 ```bash

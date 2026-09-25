@@ -15,7 +15,8 @@ proxies with these features (skip any I don't list):
   modem.dead or purchase-failed events for operator review.
 - Health overview: poll /account/proxies/health every 60s, highlight dead modems
 - API-only integration instructions: Bearer authentication, account balances,
-  tariff stock, purchase, renewal quote, renewal, separate PocketProxy endpoints,
+  tariff stock with X-Coronium-Proxy-Credentials: separate-protocol-v1 on stock
+  and purchase calls, renewal quote, renewal, separate PocketProxy endpoints,
   idempotency, and the raw Swagger reference at https://dashboard.coronium.io/api-docs/
 
 My CORONIUM_API_KEY is in .env. Deploy target: a self-hosted persistent volume.
