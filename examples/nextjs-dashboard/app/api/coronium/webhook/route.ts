@@ -5,11 +5,18 @@ import { webhookEvents } from '@/lib/customers';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const MAX_BODY_BYTES = 256 * 1024;
+
 export async function POST(req: NextRequest) {
     const secret = process.env.CORONIUM_WEBHOOK_SECRET;
     if (!secret) return new NextResponse('Webhook signing secret is not configured', { status: 503 });
 
+    // Events are small. Refuse oversized bodies before buffering them: this
+    // route is public, so it must not be a memory sink for unsigned traffic.
+    const declared = Number(req.headers.get('content-length') || 0);
+    if (declared > MAX_BODY_BYTES) return new NextResponse('Payload too large', { status: 413 });
     const raw = await req.text();
+    if (Buffer.byteLength(raw) > MAX_BODY_BYTES) return new NextResponse('Payload too large', { status: 413 });
     const expected = Buffer.from('sha256=' + createHmac('sha256', secret).update(raw).digest('hex'));
     const supplied = Buffer.from(req.headers.get('x-coronium-signature') || '');
     if (expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) {

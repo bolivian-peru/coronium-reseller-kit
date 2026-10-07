@@ -10,6 +10,12 @@
 const BASE = process.env.CORONIUM_API_BASE || 'https://api.coronium.io/api/v3';
 const KEY = process.env.CORONIUM_API_KEY;
 
+// The key is a bearer credential: refuse to send it over plain HTTP. A typo in
+// CORONIUM_API_BASE must fail loudly instead of leaking the key in clear text.
+if (!/^https:\/\//i.test(BASE) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(BASE + '/')) {
+    throw new Error('[coronium] CORONIUM_API_BASE must be an https:// URL');
+}
+
 if (!KEY) {
     // We don't throw here so the dev server still boots; the API key check
     // happens per-request so the UI can show a clear setup screen.
@@ -51,6 +57,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     return body as T;
 }
 
+function couponBody(coupon?: string) {
+    return coupon ? { coupon: { coupon_name: coupon } } : {};
+}
+
 // ─── Types (only the fields the dashboard uses) ──────────────────────────
 export interface Proxy {
     _id: string;
@@ -69,12 +79,41 @@ export interface Proxy {
     rotation_interval?: number;  // SECONDS between auto-rotations; 0 = disabled
     isOnline?: boolean;
     carrier?: { _id: string; name: string; code?: string } | null;
+    /**
+     * Per-protocol connection details. Present on proxies delivered under a
+     * credential contract; absent on legacy rows (use the flat fields then).
+     * `provider` is an opaque label that can gain new values at any time —
+     * never branch on it. Branch on `capabilities`.
+     */
     proxyEndpoints?: {
-        provider: 'pocketproxy';
+        provider: string;
+        credentials?: string;
         http?: Endpoint;
         socks5?: Endpoint;
-        capabilities?: { autoRenew?: boolean; replace?: boolean; openvpn?: boolean; p0f?: boolean };
+        capabilities?: ProxyCapabilities;
     };
+    /** Last observed serving state, where the provider reports one. Informational. */
+    providerState?: string;
+    providerObservedAt?: string | number | null;
+    /**
+     * Informational coverage date. `null` or absent = no cap known. It is not a
+     * rental deadline; `POST /payment/renewal-quote` is the authority on whether
+     * a term can be renewed.
+     */
+    renewalCoveredUntil?: string | number | null;
+}
+
+/** Every flag is optional and defaults to "not supported". New flags can appear. */
+export interface ProxyCapabilities {
+    rotate?: boolean;
+    customCredentials?: boolean;
+    rotationInterval?: boolean;
+    whitelist?: boolean;
+    autoRenew?: boolean;
+    replace?: boolean;
+    openvpn?: boolean;
+    p0f?: boolean;
+    [flag: string]: boolean | undefined;
 }
 
 export interface Endpoint { host: string; port: number | string; username: string; password: string }
@@ -126,7 +165,7 @@ export interface BuyResult {
         currency: 'USD';
         line_items: Array<{ kind: string; name: string | null; plan?: string; days?: number; quantity: number; unit_price_usd: number; line_total_usd: number }>;
         subtotal_usd: number;
-        discount: { code?: string; amount_usd?: number } | null;
+        discount: { code?: string; type?: 'percent' | 'fixed'; value?: string; amount_usd?: number } | null;
         charged_usd: number;
         balance_before_usd: number | null;
         balance_after_usd: number | null;
@@ -194,7 +233,7 @@ export const coronium = {
          * point the human clicks Buy, never per HTTP attempt.
          */
         buy: (
-            args: { tariff_id: string; modemCount: number; metadata?: Record<string, any> },
+            args: { tariff_id: string; modemCount: number; metadata?: Record<string, any>; coupon?: string },
             lane: 'account_credit' | 'crypto_btc',
             idempotencyKey: string
         ) =>
@@ -206,16 +245,20 @@ export const coronium = {
                     tariff_id: args.tariff_id,
                     modemCount: args.modemCount,
                     ...(args.metadata ? { metadata: JSON.stringify(args.metadata) } : {}),
+                    // Coupons apply on both balance lanes. The charged price
+                    // is whatever `billing.charged_usd` says — never compute it.
+                    ...(args.coupon ? { coupon: { coupon_name: args.coupon } } : {}),
                 }),
                 headers: { 'Idempotency-Key': idempotencyKey },
             }),
-        renewalQuote: (modemId: string, days: number) =>
+        renewalQuote: (modemId: string, days: number, coupon?: string) =>
             call<{ currency: 'USD'; total_usd: number; total_cents: number; line_items: any[] }>('/payment/renewal-quote', {
-                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }] }),
+                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }], ...couponBody(coupon) }),
             }),
-        renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string) =>
+        /** Pass the same coupon you quoted with, or the charge will differ from the quote. */
+        renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string, coupon?: string) =>
             call<BuyResult>(lane === 'account_credit' ? '/payment/renew-with-account-credit' : '/payment/renew-modems-with-crypto-balance', {
-                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }] }),
+                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }], ...couponBody(coupon) }),
                 headers: { 'Idempotency-Key': idempotencyKey },
             }),
     },

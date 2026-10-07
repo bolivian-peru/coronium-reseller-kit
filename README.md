@@ -69,7 +69,9 @@ ask me before any paid test purchase.
 
 Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Settings → API.
 
-For PocketProxy inventory and purchases, also send `X-Coronium-Proxy-Credentials: separate-protocol-v1`. This opts your client into **separate** `proxyEndpoints.http` and `proxyEndpoints.socks5` credentials. The legacy login/password fields describe HTTP only. Check each proxy's capabilities; PocketProxy customer auto-renew and replacement are not advertised. Its billing coverage date is not a customer rental deadline.
+On every stock and purchase call, also send `X-Coronium-Proxy-Credentials: separate-protocol-v1`. This opts your client into **separate** `proxyEndpoints.http` and `proxyEndpoints.socks5` credentials and widens the inventory you are offered (PocketProxy among it). The legacy login/password fields describe HTTP only. `proxyEndpoints.provider` is an opaque label: never branch on it. Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (PocketProxy does not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
+
+Coupons, including any reseller discount on your account, apply on both the account-credit and the BTC lane. Send `"coupon": {"coupon_name": "..."}` and read the result from `billing.discount`.
 
 **Missing stock compared with the dashboard?** Read [stock and credential negotiation](docs/stock-and-credentials.md) for the exact header, term selection, cache rules and protocol credentials.
 
@@ -170,6 +172,8 @@ Treat active proxies as customer-owned service. Check current ownership and capa
 6. **Rotation is synchronous and answers 200 on failure.** Branch on `rotated`, not on the status code.
 7. **`rotation_interval` is in SECONDS**, minimum 60, `0` disables. Passing minutes gets a 400.
 8. **Don't reinvent auto-swap or health logic.** Both are server-side, battle-tested.
+9. **Proxy passwords are your customers' secrets.** Encrypt them at rest, show them only to the owning customer, keep them and webhook payloads out of logs.
+10. **Trust the API over the event.** Confirm a replacement or a deposit with a fresh API read before handing out credentials or crediting money.
 
 ## License
 

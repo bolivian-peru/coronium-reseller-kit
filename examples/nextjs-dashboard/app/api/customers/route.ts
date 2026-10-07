@@ -17,6 +17,12 @@ export async function POST(req: NextRequest) {
     if (!/^[a-z0-9_-]{1,64}$/i.test(body.id)) {
         return NextResponse.json({ error: 'id must be 1-64 chars [a-z0-9_-]' }, { status: 400 });
     }
+    const text = (value: unknown, max: number) => value == null || (typeof value === 'string' && value.length <= max);
+    const markup = body.markup_pct;
+    if (typeof body.name !== 'string' || body.name.length > 200 || !text(body.email, 254) || !text(body.notes, 2000) ||
+        (markup != null && (typeof markup !== 'number' || !Number.isFinite(markup) || markup < 0 || markup > 1000))) {
+        return NextResponse.json({ error: 'Invalid name, email, notes or markup_pct' }, { status: 400 });
+    }
     customers.upsert({
         id: body.id,
         name: body.name,

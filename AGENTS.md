@@ -51,7 +51,10 @@ arrive and your fulfilment flow must poll instead of wait.
 9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 — a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
 10. **`metadata` is a JSON string, and it is NOT inherited by auto-swap replacements.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamp the new modem with `PUT /modems/{new_modem_id}/set-metadata` or that proxy is permanently unattributed.
 11. **PocketProxy is opt-in.** Read `docs/stock-and-credentials.md`; use the same contract and rental period throughout discovery and checkout. Send `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase calls. Use `proxyEndpoints.http` and `.socks5` independently; legacy credentials describe HTTP only.
-12. **Keep the dashboard private.** The operator sample requires Basic auth and persistent SQLite. It is not a public end-customer login or a serverless one-command deploy.
+12. **Never branch on `proxyEndpoints.provider`.** It is an opaque label and new values appear without notice. Use `proxyEndpoints.capabilities` to decide which actions to show, and do not display the provider label to end-customers.
+13. **Coupons work on both balance lanes.** Pass `coupon: {coupon_name}` on quote, purchase and renewal; confirm from `billing.discount` that it applied. Never compute a discounted price yourself.
+14. **Secrets stay out of logs and the client.** That includes the API key, the webhook signing secret, proxy passwords and raw webhook payloads.
+15. **Keep the dashboard private.** The operator sample requires Basic auth and persistent SQLite. It is not a public end-customer login or a serverless one-command deploy.
 
 ## Architecture you should produce
 
@@ -128,7 +131,7 @@ When a modem the reseller owns dies (5+ consecutive failed health checks AND rem
     "http_port": "8042",
     "socks_port": "5042",
     "proxy_login": "admin",
-    "proxy_password": "kP3aL9zXq7Wm",
+    "proxy_password": "EXAMPLE_PASSWORD",
     "tariff_expired_at": 1780987974498,
     "isOnline": true
   }

@@ -29,11 +29,21 @@ export async function proxy(req: NextRequest) {
     }
 
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        // Browsers attach cached Basic credentials to cross-site requests, so a
+        // state-changing call must prove it came from this dashboard's own pages.
         const origin = req.headers.get('origin');
         if (origin && origin !== req.nextUrl.origin) return new NextResponse('Invalid origin', { status: 403 });
+        const site = req.headers.get('sec-fetch-site');
+        if (site && site !== 'same-origin' && site !== 'none') return new NextResponse('Invalid origin', { status: 403 });
     }
     const response = NextResponse.next();
+    // Pages here show proxy passwords and carry a Buy button: never cache them,
+    // never let another site frame them, never leak the URL in a Referer.
     response.headers.set('Cache-Control', 'no-store');
+    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+    response.headers.set('X-Content-Type-Options', 'nosniff');
+    response.headers.set('Referrer-Policy', 'no-referrer');
     return response;
 }
 

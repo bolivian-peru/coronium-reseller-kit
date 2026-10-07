@@ -23,11 +23,22 @@ PocketProxy inventory alongside the other providers; it does not bypass farmer
 consent, health/readiness, sold-device protection or term coverage. Existing owned
 proxies remain visible without opt-in.
 
-For delivered PocketProxy proxies, read `proxyEndpoints.http` and
-`proxyEndpoints.socks5` independently. Each has `host`, `port`, `username`,
+Whenever a delivered proxy carries `proxyEndpoints`, read `proxyEndpoints.http`
+and `proxyEndpoints.socks5` independently. Each has `host`, `port`, `username`,
 `password`. The old `proxy_login` and `proxy_password` describe HTTP only.
-Do not combine those credentials with a SOCKS5 port. Check capabilities before
-offering automatic renewal, replacement or provider-specific settings.
+Do not combine those credentials with a SOCKS5 port.
+
+`proxyEndpoints.provider` is an opaque label. New values appear as inventory
+sources are added, so never branch on it and never show it to your customers.
+Branch on `proxyEndpoints.capabilities` instead (`rotate`, `replace`,
+`autoRenew`, `rotationInterval`, `whitelist`, `customCredentials`, `openvpn`,
+`p0f`; more can be added). A flag that is absent or `false` means the action is
+not offered for that proxy: hide the control rather than letting the call fail.
+Proxies without a `proxyEndpoints` object are legacy rows and use the flat
+fields.
+
+Send the header on every stock and purchase call regardless of which products
+you intend to sell. It only widens what you are offered.
 
 If stock differs between your integration and the dashboard:
 

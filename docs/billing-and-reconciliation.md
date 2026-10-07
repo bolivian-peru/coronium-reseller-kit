@@ -92,10 +92,18 @@ reconciles exactly — you never have to tolerate a 1-cent drift.
 `discount.amount_usd` is the **observed** delta (`subtotal - charged`), not a
 recomputation of the coupon rule. If a coupon partially applies, the number still ties out.
 
-### Coupons only apply on the `account_credit` lane
+### Coupons apply on both balance lanes
 
-On `crypto_btc`, `discount` is **always `null`** and `subtotal_usd == charged_usd`. That is
-reported truthfully rather than hidden — if you need coupons, use the credit lane.
+Send `"coupon": {"coupon_name": "<code>"}` in the purchase, renewal and renewal-quote body.
+It is honoured on `account_credit` and on `crypto_btc`. (Before September 2026 the BTC lane
+ignored coupons; if you built against that, re-test.) A missing or expired code does
+not necessarily fail the order: it can go through at list price with `discount: null`. So
+validate the code up front with `POST /api/v3/coupons/check`, quote before you charge, and
+always confirm from `billing.discount` that it was applied before you book your margin.
+
+Any account-specific reseller discount is delivered as a coupon code. Prices returned by
+`/tariffs/available` are list prices and never include it, so the discount cannot be applied
+twice: `subtotal_usd` is list, `charged_usd` is what you paid.
 
 ### `settlement` (crypto lane only)
 
@@ -171,6 +179,7 @@ If `configured` is `false`, stop debugging your receiver — nothing was ever go
 
 ```js
 const r = await buy({ tariff_id, modemCount: 1, coupon: { coupon_name: 'SAVE10' } });
+if (!r.billing.discount) console.warn('coupon was not applied — charged list price');
 
 // what you paid, and the margin you have to price against
 const cost   = r.billing.charged_usd;

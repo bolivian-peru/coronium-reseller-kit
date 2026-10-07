@@ -11,8 +11,8 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 1. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md> — your instructions
 2. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/PROMPT.md> — the prompts the human will paste
 3. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/billing-and-reconciliation.md> — charged amount, coupon before/after, carrier, webhook receipt
-3. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> — working foundation
-4. <https://dashboard.coronium.io/api-docs/> — authoritative interactive API reference (OpenAPI / Swagger UI, public)
+4. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> — working foundation
+5. <https://dashboard.coronium.io/api-docs/> — authoritative interactive API reference (OpenAPI / Swagger UI, public)
 
 ## API endpoints you'll use
 
@@ -43,7 +43,9 @@ Errors on `/api/v3` return `{error, code, suggested_action, request_id}` plus an
 - **Server-side JWT**: never put `CORONIUM_API_KEY` in client-side code. All API calls go through the reseller's own server.
 - **Webhook auto-swap**: when a customer's modem dies, Coronium fires `modem.replaced` to the reseller's webhook URL. Fields are nested under `data` (`data.old_modem_id`, `data.new_modem`), the envelope carries `event_id`/`occurred_at`/`account`. Deliveries are HMAC-signed (`X-Coronium-Signature`) and retried up to 8 times.
 - **Idempotency**: `Idempotency-Key` header on `/payment/*` POSTs, `[A-Za-z0-9_-]{8,128}`, 24h replay window. One key per buy intent, reused across retries.
-- **PocketProxy**: send `X-Coronium-Proxy-Credentials: separate-protocol-v1` for stock and purchase. Read separate `proxyEndpoints.http` and `.socks5`; never reuse HTTP credentials for SOCKS5.
+- **Stock header**: send `X-Coronium-Proxy-Credentials: separate-protocol-v1` on every stock and purchase call. Read separate `proxyEndpoints.http` and `.socks5`; never reuse HTTP credentials for SOCKS5.
+- **Capabilities, not provider**: `proxyEndpoints.provider` is an opaque label — never branch on it or show it. Use `proxyEndpoints.capabilities` to decide which actions exist for a proxy.
+- **Coupons**: `coupon: {coupon_name}` works on account-credit and BTC lanes, on quote, purchase and renewal. Read the applied discount from `billing.discount`; list price is `billing.subtotal_usd`.
 
 ## Don't
 

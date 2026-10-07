@@ -4,7 +4,7 @@ What to charge your customers on top of the wholesale Coronium price.
 
 ## The economics
 
-You pay Coronium wholesale (the prices on `/api/v3/tariffs/available`). You set your retail price. The delta is your margin.
+You pay Coronium the price on `/api/v3/tariffs/available`, less any coupon on your account. Take your real cost from `billing.charged_usd` on each order, not from the list. You set your retail price. The delta is your margin.
 
 Typical retail markups in the mobile-proxy reseller market:
 
@@ -66,6 +66,10 @@ In the example `nextjs-dashboard` we surface `markup_pct` per customer for the r
 
 ## When to renegotiate with Coronium
 
-If you're doing $5k+ MRR on Coronium, ping support — there are volume tiers available beyond the public pricing. We'd rather give you a 10-15% discount and keep you growing than push you to a competitor.
+Volume pricing is agreed per reseller and depends on the number of active proxies you keep.
+It is delivered as a coupon code on your account, sent with each order and renewal; the
+percentage is whatever your agreement says, not a figure from this page. See
+[billing-and-reconciliation.md](billing-and-reconciliation.md) for how the discount shows up
+in every response.
 
-Contact: <hello@coronium.io> with your account email + current MRR.
+Contact: <hello@coronium.io> with your account email and current active-proxy count.

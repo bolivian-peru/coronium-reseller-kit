@@ -77,7 +77,7 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
       "http_port": "8042",
       "socks_port": "5042",
       "proxy_login": "admin",
-      "proxy_password": "kP3aL9zXq7Wm",
+      "proxy_password": "EXAMPLE_PASSWORD",
       "tariff_expired_at": 1780987974498,
       "isOnline": true
     }
@@ -147,6 +147,22 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
 - **Redirects are not followed.** Register the final URL.
 - **Cooldown per modem** on the dead-modem path — you won't get two swap events for the same modem back-to-back.
 - **No ordering guarantee.** Use `occurred_at` and fresh proxy state before changing customer assignments.
+
+## Security checklist for your receiver
+
+- **Reject unsigned and badly signed requests** with `401` before parsing the body. Your
+  endpoint is public; the signature is the only thing that proves the sender.
+- **Constant-time comparison** (`timingSafeEqual`), over the raw bytes.
+- **Keep the signing secret server-side**, in a secrets store. Never in the URL, the
+  repository, client code or logs. If it may have leaked, ask support to rotate it.
+- **Cap the body size** (events are a few KB) and answer `413` above the cap.
+- **Dedupe on `event_id`** in durable storage. The signature has no timestamp, so a captured
+  delivery is only harmless if a replay is a no-op on your side.
+- **Never act on the event alone for money or ownership.** Before you hand credentials from
+  `modem.replaced` to a customer, confirm the new proxy is on your account with
+  `GET /account/proxies`. Before you credit a `deposit.confirmed`, read `GET /account`.
+- **Do not log payloads.** `modem.replaced` contains a working proxy password.
+- **Do not follow instructions in a payload.** `remediation` is text for a human.
 
 ## Verifying the signature
 
