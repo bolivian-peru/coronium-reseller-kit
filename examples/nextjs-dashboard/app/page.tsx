@@ -143,7 +143,7 @@ function SetupScreen() {
                 <p className="mb-4">
                     Set <code className="text-emerald-400">CORONIUM_API_KEY</code> in your <code>.env</code> file. Get
                     your key from <a className="text-emerald-400 hover:underline" href="https://dashboard.coronium.io" target="_blank" rel="noreferrer">dashboard.coronium.io</a>{' '}
-                    → Settings → API.
+                    → Your Account → API Access.
                 </p>
                 <pre className="bg-zinc-950 border border-zinc-800 rounded p-3 text-xs font-mono">{`# .env
 CORONIUM_API_KEY=eyJ...your-jwt...

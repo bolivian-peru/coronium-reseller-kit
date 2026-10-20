@@ -1,11 +1,10 @@
 # Seeing all eligible inventory
 
-The stock API defaults to the legacy shared-credential contract. PocketProxy can
-have different HTTP and SOCKS5 hosts and credentials, so clients must explicitly
-support the separate-protocol contract before it is offered for a new purchase.
-This is not a separate account balance, permission tier or extra authentication.
+PocketProxy is **not** opt-in. Without any header you are offered, and sold, PocketProxy units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses farmer consent, health checks or rental-term coverage, and an order with `autoRenew: true` is never filled from PocketProxy.
 
-Set this on your server-side API client for **both stock and purchase** requests:
+This is not a separate account balance, permission tier or extra authentication.
+To be offered every eligible unit, set this on your server-side API client for
+**both stock and purchase** requests:
 
 ```http
 X-Coronium-Proxy-Credentials: separate-protocol-v1
@@ -18,10 +17,10 @@ curl 'https://api.coronium.io/api/v3/tariffs/available' \
   -H 'X-Coronium-Proxy-Credentials: separate-protocol-v1'
 ```
 
-Use the exact tariff period (`day`, `week`, `month`). The header includes eligible
-PocketProxy inventory alongside the other providers; it does not bypass farmer
-consent, health/readiness, sold-device protection or term coverage. Existing owned
-proxies remain visible without opt-in.
+Use the exact tariff period (`day`, `week`, `month`). The header adds the
+separate-login PocketProxy units to the inventory you are offered; it does not bypass
+farmer consent, health/readiness, sold-device protection or term coverage. Existing
+owned proxies remain visible with or without the header.
 
 Whenever a delivered proxy carries `proxyEndpoints`, read `proxyEndpoints.http`
 and `proxyEndpoints.socks5` independently. Each has `host`, `port`, `username`,
@@ -37,8 +36,8 @@ not offered for that proxy: hide the control rather than letting the call fail.
 Proxies without a `proxyEndpoints` object are legacy rows and use the flat
 fields.
 
-Send the header on every stock and purchase call regardless of which products
-you intend to sell. It only widens what you are offered.
+Sending the header on every stock and purchase call is recommended if your client
+reads `proxyEndpoints`. It only widens what you are offered.
 
 If stock differs between your integration and the dashboard:
 

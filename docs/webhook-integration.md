@@ -58,7 +58,7 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 
 ## Event types
 
-### `modem.replaced` — auto-swap succeeded
+### `modem.replaced` — a proxy was replaced (automatically, by your Replace call, or by support)
 
 ```json
 {
@@ -85,7 +85,7 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 }
 ```
 
-The replacement carries the remaining paid time — but **not** the original's `metadata`. Re-stamp it via `PUT /modems/{new_modem_id}/set-metadata` or the proxy loses its customer tag. See [`metadata-strategy.md`](./metadata-strategy.md).
+Same payload for every replacement. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
 
 ### `modem.dead` — auto-swap couldn't complete
 
@@ -141,9 +141,9 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
 
 ## Delivery semantics
 
-- **Signed.** Every POST carries `X-Coronium-Signature: sha256=<hex>` — an HMAC-SHA256 of the raw body under your signing secret — plus `X-Coronium-Event-Id`. Ask support for your secret and verify it (see below).
-- **Durable, with retries.** Up to **8 attempts** with escalating backoff, then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent — dedupe on `event_id`.
-- **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried.
+- **Signed.** Every POST carries `X-Coronium-Signature: sha256=<hex>` — an HMAC-SHA256 of the raw body under your signing secret — plus `X-Coronium-Signature-Source` (`account` or `global`), `X-Coronium-Event-Id` and `User-Agent: Coronium-Webhooks/1.0`. Create or rotate your own secret with `POST /api/v3/account/webhook/secret/rotate` (shown once) and verify it (see below).
+- **Durable, with retries.** Up to **8 attempts** (immediately, then after 5 s, 30 s, 5 min, 30 min, 2 h, 6 h and 24 h; the last about 32.6 h after the first), then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent — dedupe on `event_id`.
+- **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried. (`POST /account/webhook/test` waits up to 8 s.)
 - **Redirects are not followed.** Register the final URL.
 - **Cooldown per modem** on the dead-modem path — you won't get two swap events for the same modem back-to-back.
 - **No ordering guarantee.** Use `occurred_at` and fresh proxy state before changing customer assignments.

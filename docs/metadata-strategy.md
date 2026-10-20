@@ -46,18 +46,16 @@ If you stored "modem 69b5… belongs to acme-007" only in your own database, you
 
 With `metadata`, the truth for those cases lives on the modem record itself and `GET /account/proxies` alone tells you who owns what.
 
-## ⚠️ The one case metadata does NOT cover: auto-swap
+## Replacements keep metadata
 
-**Metadata is NOT copied onto the replacement modem.** The swap transfers the remaining paid time and nothing else — the new modem's `metadata` is empty. If you rely on metadata alone, every auto-swapped proxy silently becomes `<unassigned>` and you lose the link to your customer exactly when you most need it.
-
-Handle it in your `modem.replaced` webhook:
+Every replacement — automatic after a modem dies, your own `POST /modems/:id/replace`, or one by support — copies `metadata` and the remaining paid time onto the new proxy, also across chains (A → B → C). Lines replaced before October 2026 may have lost it, so re-stamping in your `modem.replaced` handler is still a cheap safety net:
 
 ```ts
 // After you've updated your own record old_modem_id → new_modem_id:
 await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
 ```
 
-Because of this, keep a **minimal durable** `old_modem_id → customer_id + metadata` index and a signed webhook inbox. Backfill the index from current proxy metadata before an existing account begins receiving swap events. Treat metadata as the primary self-describing mapping, and the index as recovery state when the old modem disappears before the event is processed.
+Also keep a **minimal durable** `old_modem_id → customer_id + metadata` index and a signed webhook inbox. Backfill the index from current proxy metadata before an existing account begins receiving swap events. Treat metadata as the primary self-describing mapping, and the index as recovery state when the old modem disappears before the event is processed.
 
 ## What to put in metadata
 

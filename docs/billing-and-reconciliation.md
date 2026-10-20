@@ -121,8 +121,18 @@ because the lane settles in BTC.
 
 ### When `billing` is absent
 
-Only on a genuine `200`. It never appears on `4xx`, `5xx`, or a `503`-with-refund. If you
-got a non-2xx, there is nothing to reconcile — no money moved.
+Only on a genuine `200`. It never appears on `202`, `4xx` or `5xx`. That does **not** mean
+no money moved — reconcile by `paymentId` whenever an answer carries one:
+
+| Answer | Money | What to do |
+|---|---|---|
+| `202` with `paymentId` | charged, still provisioning | poll `GET /api/v3/payments/{paymentId}/status`; do not re-order |
+| `503 payment_delivery_unconfirmed` with `paymentId` | charged, delivery not verified | same as `202` |
+| `503 no_stock` / `upstream_degraded` with `refunded: true` | refunded to your account balance already | safe to retry later or elsewhere |
+| `500` with `paymentId` and `refunded: false` | charged, provisioning failed, **no automatic refund in this answer** | check the payment status, open a ticket with the `paymentId`; never re-send the order blindly |
+| `4xx`, or `500` without `paymentId` | nothing created, nothing charged | fix and retry |
+
+Refunds always go to your Coronium account balance, never back to a card or wallet.
 
 ---
 

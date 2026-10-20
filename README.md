@@ -67,9 +67,9 @@ ask me before any paid test purchase.
 | `GET /api/v3/account/webhook` | Read current webhook URL |
 | `POST /api/v3/account/webhook/test` | Fire a real signed test event and get the delivery result |
 
-Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Settings → API.
+Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Your Account → API Access.
 
-On every stock and purchase call, also send `X-Coronium-Proxy-Credentials: separate-protocol-v1`. This opts your client into **separate** `proxyEndpoints.http` and `proxyEndpoints.socks5` credentials and widens the inventory you are offered (PocketProxy among it). The legacy login/password fields describe HTTP only. `proxyEndpoints.provider` is an opaque label: never branch on it. Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (PocketProxy does not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
+PocketProxy is **not** opt-in. Without any header you are offered, and sold, PocketProxy units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses farmer consent, health checks or rental-term coverage, and an order with `autoRenew: true` is never filled from PocketProxy. `proxyEndpoints.provider` is an opaque label: never branch on it. Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (PocketProxy does not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
 
 Coupons, including any reseller discount on your account, apply on both the account-credit and the BTC lane. Send `"coupon": {"coupon_name": "..."}` and read the result from `billing.discount`.
 
@@ -105,7 +105,7 @@ Every 4xx/5xx on `/api/v3` carries:
 }
 ```
 
-`error` is the human string, `code` the machine identifier. Log `request_id` (also returned as the `X-Request-Id` header) and quote it in support tickets. The current balance-purchase lanes return **409 `OUT_OF_STOCK`** when stock runs out. Do not retry-loop or switch products without asking the buyer.
+`error` is the human string, `code` the machine identifier. Log `request_id` (also returned as the `X-Request-Id` header) and quote it in support tickets. Out of stock is **409 with `code: "no_stock"`** on `/api/v3` (the same answer carries `reason_code: "OUT_OF_STOCK"`, the spelling `/api/v1` and the `proxy.purchase_failed` webhook use; branch on either). Do not retry-loop or switch products without asking the buyer.
 
 ## Core integration pattern (read this once)
 
@@ -154,7 +154,7 @@ When a supported modem is auto-replaced, Coronium transfers its remaining paid t
 }
 ```
 
-Reading `body.old_modem_id` gives `undefined` — it lives at `body.data.old_modem_id`. Deliveries are signed (`X-Coronium-Signature`) and retried up to 8 times, so verify the signature and dedupe on `event_id`. **The replacement does not inherit `metadata`** — re-stamp it, or the proxy shows up unassigned.
+Reading `body.old_modem_id` gives `undefined` — it lives at `body.data.old_modem_id`. Deliveries are signed (`X-Coronium-Signature`) and retried up to 8 times, so verify the signature and dedupe on `event_id`. Every replacement (automatic, your own `POST /modems/:id/replace`, or by support) sends `modem.replaced` and carries `metadata` to the new proxy; re-stamping it is harmless and keeps older lines safe.
 
 If no replacement is available, you may get `modem.dead` with `new_modem_id: null` and a `reason` code. You also receive purchase, purchase-failure, renewal and expiry events. Full event spec in [`docs/webhook-integration.md`](./docs/webhook-integration.md).
 

@@ -51,7 +51,7 @@ async function main() {
 
     if (!KEY) {
         console.log('  CORONIUM_API_KEY is not set.\n');
-        console.log('  Get your key at https://dashboard.coronium.io → Settings → API, then:');
+        console.log('  Get your key at https://dashboard.coronium.io → Your Account → API Access, then:');
         console.log('    CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs\n');
         process.exit(1);
     }
@@ -83,7 +83,7 @@ async function main() {
         ok(`key accepted${account.body?.login ? ` — ${account.body.login}` : ''}`);
     } else {
         bad(`key rejected — ${describeError(account)}`);
-        note('Copy a fresh JWT from dashboard.coronium.io → Settings → API.');
+        note('Copy a fresh JWT from dashboard.coronium.io → Your Account → API Access.');
     }
 
     // 3. Spending power — a valid key with an empty balance still cannot buy.

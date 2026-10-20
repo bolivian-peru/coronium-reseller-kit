@@ -8,7 +8,7 @@ The shortest possible path from zero to a working reseller business.
 
 ## 2. Get your API key
 
-Dashboard → Settings → API. Copy the JWT. This is your reseller identity for every API call.
+Dashboard → Your Account → API Access. Copy the JWT. This is your reseller identity for every API call.
 
 Confirm it works before building anything:
 
@@ -83,7 +83,7 @@ Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succee
 
 ## 5. Buy your first proxy
 
-Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth). For PocketProxy include `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase. Then, with authorization to spend the reseller balance, buy through the dashboard UI or curl:
+Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth). PocketProxy needs no header; add `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase only if your client reads separate HTTP/SOCKS5 logins from `proxyEndpoints`. Then, with authorization to spend the reseller balance, buy through the dashboard UI or curl:
 
 ```bash
 curl -X POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance \
