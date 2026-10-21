@@ -1,5 +1,5 @@
 /**
- * Standalone Coronium webhook receiver — Node + Express.
+ * Standalone Coronium webhook receiver - Node + Express.
  *
  * For resellers who already have a backend / CRM and just want to wire in
  * the auto-swap event flow without adopting a full dashboard framework.
@@ -50,7 +50,7 @@ function signatureMatches(raw, secret, header) {
 }
 
 app.post('/coronium/webhook', (req, res) => {
-    // Cryptographic check — proves the POST really came from Coronium.
+    // Cryptographic check - proves the POST really came from Coronium.
     if (!signatureMatches(req.rawBody || Buffer.alloc(0), SIGNING_SECRET, req.get('x-coronium-signature'))) {
         console.warn('[webhook] rejected: bad X-Coronium-Signature');
         return res.status(401).send('bad signature');
@@ -115,7 +115,7 @@ async function processEvent(body) {
             //
             // 3) Email the customer the new credentials (their old ones are dead).
             //    The new modem is in the same country, with the same remaining
-            //    paid time — they don't lose anything, but the URL changes.
+            //    paid time - they don't lose anything, but the URL changes.
             //
             // 4) IMPORTANT: the replacement does NOT inherit the old modem's
             //    metadata. Re-stamp it or the proxy shows up unassigned:
@@ -128,14 +128,14 @@ async function processEvent(body) {
             //
             // No replacement was available. Possible reasons:
             //   - no_stock          : geo is exhausted right now
-            //   - pipeline_failed   : provisioning bug — file a ticket with data.old_modem_id
+            //   - pipeline_failed   : provisioning bug - file a ticket with data.old_modem_id
             //   - shared_modem      : was on a shared tariff (rare for resellers)
-            //   - tariff_orphan     : corrupt tariff record — ticket
+            //   - tariff_orphan     : corrupt tariff record - ticket
             //
             // Recommended:
             //   1) Flag the modem in your local state.
             //   2) Notify the end-customer; offer refund or manual replacement
-            //      (call POST /api/v3/modems/{old_modem_id}/replace yourself —
+            //      (call POST /api/v3/modems/{old_modem_id}/replace yourself -
             //      it may succeed later when stock returns).
             //   3) Optionally retry /replace on a schedule.
             break;
@@ -153,7 +153,7 @@ async function processEvent(body) {
             break;
 
         case 'webhook.test':
-            console.log('[event] webhook.test — endpoint wired correctly');
+            console.log('[event] webhook.test - endpoint wired correctly');
             break;
 
         default:

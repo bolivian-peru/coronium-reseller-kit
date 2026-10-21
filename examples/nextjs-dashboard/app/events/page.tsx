@@ -12,7 +12,7 @@ export default function EventsPage() {
                 <code className="bg-zinc-900 px-1.5 py-0.5 rounded text-emerald-400">
                     POST /api/coronium/webhook
                 </code>{' '}
-                — register it once with{' '}
+                - register it once with{' '}
                 <code className="bg-zinc-900 px-1.5 py-0.5 rounded">PUT /api/v3/account/webhook</code>{' '}
                 on the Coronium API.
             </p>
@@ -44,9 +44,9 @@ export default function EventsPage() {
                                             {e.event}
                                         </span>
                                     </td>
-                                    <td className="py-2 font-mono text-xs">{e.old_modem_id?.slice(0, 12) || '—'}</td>
-                                    <td className="py-2 font-mono text-xs">{e.new_modem_id?.slice(0, 12) || '—'}</td>
-                                    <td className="py-2 text-xs text-zinc-400">{e.reason || '—'}</td>
+                                    <td className="py-2 font-mono text-xs">{e.old_modem_id?.slice(0, 12) || '-'}</td>
+                                    <td className="py-2 font-mono text-xs">{e.new_modem_id?.slice(0, 12) || '-'}</td>
+                                    <td className="py-2 text-xs text-zinc-400">{e.reason || '-'}</td>
                                     <td className="py-2 text-xs text-zinc-400">{e.state}{e.error ? ` · ${e.error}` : ''}</td>
                                 </tr>
                             ))}

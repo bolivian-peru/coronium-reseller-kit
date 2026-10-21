@@ -1,7 +1,7 @@
 /**
  * Local store of the reseller's end-customers.
  *
- * Coronium's modems have a freeform `metadata` JSON field — this is your
+ * Coronium's modems have a freeform `metadata` JSON field - this is your
  * mapping layer. You don't need a separate `proxies` table; just store the
  * end-customer profile here and stamp `metadata.customer_id` on every modem
  * you buy on their behalf.

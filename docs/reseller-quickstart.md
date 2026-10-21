@@ -4,7 +4,7 @@ The shortest possible path from zero to a working reseller business.
 
 ## 1. Sign up at Coronium
 
-<https://dashboard.coronium.io> — create an account, verify email, top up your balance via Stripe / Bitcoin / USDT. The balance is what you pay Coronium when you buy proxies on customers' behalf.
+<https://dashboard.coronium.io> - create an account, verify email, top up your balance via Stripe / Bitcoin / USDT. The balance is what you pay Coronium when you buy proxies on customers' behalf.
 
 ## 2. Get your API key
 
@@ -18,7 +18,7 @@ cd coronium-reseller-kit
 CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs
 ```
 
-This checks reachability, live stock, your key, balance, inventory, health and webhook registration — read-only, nothing is bought. Every failure prints the `request_id` to quote in a support ticket.
+This checks reachability, live stock, your key, balance, inventory, health and webhook registration - read-only, nothing is bought. Every failure prints the `request_id` to quote in a support ticket.
 
 ## 3. Pick a starter
 
@@ -70,7 +70,7 @@ curl -X PUT https://api.coronium.io/api/v3/account/webhook \
   -d '{"webhook_url":"https://your-host/api/coronium/webhook"}'
 ```
 
-Then prove it actually works — don't wait for a real outage to find out:
+Then prove it actually works - don't wait for a real outage to find out:
 
 ```bash
 curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
@@ -83,7 +83,7 @@ Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succee
 
 ## 5. Buy your first proxy
 
-Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth). PocketProxy needs no header; add `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase only if your client reads separate HTTP/SOCKS5 logins from `proxyEndpoints`. Then, with authorization to spend the reseller balance, buy through the dashboard UI or curl:
+Pick a `tariff_id` from `GET /api/v3/tariffs/available` (public, no auth). No header is needed; add `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase only if your client reads separate HTTP/SOCKS5 logins from `proxyEndpoints`. Then, with authorization to spend the reseller balance, buy through the dashboard UI or curl:
 
 ```bash
 curl -X POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balance \
@@ -119,7 +119,7 @@ For end-customer auth, billing, and dashboard, you build that yourself on top of
    curl -X POST https://api.coronium.io/api/v3/modems/$MODEM_ID/restart \
      -H "Authorization: Bearer $CORONIUM_API_KEY"
    ```
-   The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change — the call still returns 200, so always read that field.
+   The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change - the call still returns 200, so always read that field.
 4. Where the provider supports auto-swap, a signed `modem.replaced` event carries the new connection details. Reconcile the mapping, re-stamp metadata and notify the customer. For providers without replacement capability, rely on health checks and your support workflow.
 
 That's the whole flywheel.

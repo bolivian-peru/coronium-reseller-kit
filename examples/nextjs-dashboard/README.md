@@ -1,6 +1,6 @@
 # Coronium reseller operator dashboard
 
-This self-hosted Next.js example uses the current Coronium v3 API. It handles account credit or BTC purchases, explicit renewals with a server price quote, separate PocketProxy HTTP/SOCKS5 credentials, and a signed webhook inbox. It is an **operator dashboard**, not an end-customer portal or retail checkout.
+This self-hosted Next.js example uses the current Coronium v3 API. It handles account credit or BTC purchases, explicit renewals with a server price quote, separate HTTP/SOCKS5 credentials, an optional p0f requirement on purchase, and a signed webhook inbox. It is an **operator dashboard**, not an end-customer portal or retail checkout.
 
 ## Run
 
@@ -39,6 +39,6 @@ Before enabling webhooks for an existing reseller account, run the worker once w
 
 The buy page shows an estimated tariff price; Coronium's `billing` response is the actual charge. The renewal UI fetches `POST /payment/renewal-quote` and requires a fresh confirmed price before charging. It does not turn on recurring auto-renew. Both payment lanes send an `Idempotency-Key` and keep the same key after a timeout or ambiguous response. Check Coronium's account and payment state before creating a new intent after an uncertain result.
 
-`X-Coronium-Proxy-Credentials: separate-protocol-v1` opts this client into PocketProxy stock. For those proxies, `proxyEndpoints.http` and `.socks5` can carry different hosts and credentials; the customer page displays each separately. The legacy credential fields are HTTP compatibility fields and must not be reused for SOCKS5.
+`X-Coronium-Proxy-Credentials: separate-protocol-v1` also offers this client units with separate HTTP/SOCKS5 logins. For those proxies, `proxyEndpoints.http` and `.socks5` can carry different hosts and credentials; the customer page displays each separately. The legacy credential fields are HTTP compatibility fields and must not be reused for SOCKS5.
 
 Do not use this sample as a public customer login. Add tenant authentication, retail billing, notifications, and a durable shared database before offering it to end-customers.

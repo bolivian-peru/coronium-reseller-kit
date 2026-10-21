@@ -6,7 +6,7 @@ How to track which Coronium modem belongs to each end-customer, including after 
 
 Every Modem record in Coronium has a freeform `metadata` field. It's a JSON string. **You control it.** Coronium stores it verbatim and returns it on every `/account/proxies` call.
 
-Stamp it when you buy. Send it **pre-stringified** — the column is a string server-side, so passing a bare object is not guaranteed to round-trip:
+Stamp it when you buy. Send it **pre-stringified** - the column is a string server-side, so passing a bare object is not guaranteed to round-trip:
 
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
@@ -40,15 +40,15 @@ Note: `metadata` comes back as a JSON string, not a parsed object. JSON-parse it
 
 If you stored "modem 69b5… belongs to acme-007" only in your own database, you'd need to keep it in sync across:
 
-- Renewals (creates a new payment row, but modem_id stays — you don't strictly need to update, but easy to mishandle)
-- Refunds (modem deleted on Coronium side — your table would have a dangling row)
+- Renewals (creates a new payment row, but modem_id stays - you don't strictly need to update, but easy to mishandle)
+- Refunds (modem deleted on Coronium side - your table would have a dangling row)
 - Manual admin actions on Coronium side
 
 With `metadata`, the truth for those cases lives on the modem record itself and `GET /account/proxies` alone tells you who owns what.
 
 ## Replacements keep metadata
 
-Every replacement — automatic after a modem dies, your own `POST /modems/:id/replace`, or one by support — copies `metadata` and the remaining paid time onto the new proxy, also across chains (A → B → C). Lines replaced before October 2026 may have lost it, so re-stamping in your `modem.replaced` handler is still a cheap safety net:
+Every replacement - automatic after a modem dies, your own `POST /modems/:id/replace`, or one by support - copies `metadata` and the remaining paid time onto the new proxy, also across chains (A → B → C). Lines replaced before October 2026 may have lost it, so re-stamping in your `modem.replaced` handler is still a cheap safety net:
 
 ```ts
 // After you've updated your own record old_modem_id → new_modem_id:
@@ -74,7 +74,7 @@ Whatever you need to track. Recommended fields:
 Don't put:
 
 - Credentials (already in the modem record itself)
-- Anything secret — metadata is returned in plaintext to any API call with your JWT
+- Anything secret - metadata is returned in plaintext to any API call with your JWT
 - Anything large (we don't enforce a hard limit but >2 KB is wasteful)
 
 ## Querying
@@ -95,7 +95,7 @@ For >1000 proxies the filter becomes noticeable. At that scale, build an in-memo
 
 ## Updating metadata after purchase
 
-`PUT /api/v3/modems/{id}/set-metadata` with `{"metadata": "<json string>"}` replaces it wholesale (there is no partial merge — send the complete object). It accepts a bare object too and stringifies it for you, but sending a string keeps buy and update paths identical.
+`PUT /api/v3/modems/{id}/set-metadata` with `{"metadata": "<json string>"}` replaces it wholesale (there is no partial merge - send the complete object). It accepts a bare object too and stringifies it for you, but sending a string keeps buy and update paths identical.
 
 You need this in two situations: reassigning a proxy to a different customer, and re-stamping a replacement after an auto-swap (see above).
 

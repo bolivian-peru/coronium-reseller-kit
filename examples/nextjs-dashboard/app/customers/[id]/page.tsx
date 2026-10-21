@@ -91,7 +91,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                                                 : <span className="badge badge-muted">unknown</span>}
                                         </td>
                                         <td className="py-2 text-xs text-zinc-400">
-                                            {p.tariff_expired_at ? new Date(p.tariff_expired_at).toISOString().slice(0, 10) : '—'}
+                                            {p.tariff_expired_at ? new Date(p.tariff_expired_at).toISOString().slice(0, 10) : '-'}
                                         </td>
                                         <td className="py-2"><RenewForm modemId={p._id} customerId={customer.id} /></td>
                                     </tr>

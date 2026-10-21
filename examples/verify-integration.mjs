@@ -3,7 +3,7 @@
  * Coronium integration smoke test.
  *
  * Answers the question every reseller has on day one: "is my key actually
- * working, and what can I do with it right now?" — before writing any code.
+ * working, and what can I do with it right now?" - before writing any code.
  *
  *   CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs
  *
@@ -11,7 +11,7 @@
  * --webhook-test to additionally fire one real signed test event at your
  * registered webhook URL (safe: it only POSTs to a URL you registered).
  *
- * Zero dependencies — Node 18+ built-ins only.
+ * Zero dependencies - Node 18+ built-ins only.
  */
 
 const BASE = process.env.CORONIUM_API_BASE || 'https://api.coronium.io/api/v3';
@@ -36,7 +36,7 @@ async function call(path, init) {
     return { status: r.status, body, requestId: r.headers.get('x-request-id') };
 }
 
-/** Errors carry {error, code, suggested_action, request_id} — surface all of it. */
+/** Errors carry {error, code, suggested_action, request_id} - surface all of it. */
 function describeError(res) {
     const parts = [`HTTP ${res.status}`, res.body?.error || '(no error string)'];
     if (res.body?.code) parts.push(`code=${res.body.code}`);
@@ -49,19 +49,12 @@ function describeError(res) {
 async function main() {
     console.log(`\nCoronium integration check → ${BASE}\n`);
 
-    if (!KEY) {
-        console.log('  CORONIUM_API_KEY is not set.\n');
-        console.log('  Get your key at https://dashboard.coronium.io → Your Account → API Access, then:');
-        console.log('    CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs\n');
-        process.exit(1);
-    }
-
-    // 1. Stock is public — proves network/DNS/TLS before we blame the key.
+    // 1. Stock is public - proves network/DNS/TLS before we blame the key.
     console.log('1. Reachability + live stock');
     const tariffs = await call('/tariffs/available');
     if (tariffs.status === 200 && Array.isArray(tariffs.body?.data)) {
         const inStock = tariffs.body.data.filter((t) => (t.stock ?? 0) > 0);
-        ok(`API reachable — ${inStock.length} tariffs in stock`);
+        ok(`API reachable - ${inStock.length} tariffs in stock`);
         const byCountry = new Map();
         for (const t of inStock) {
             byCountry.set(t.country_code, (byCountry.get(t.country_code) || 0) + (t.stock || 0));
@@ -71,23 +64,62 @@ async function main() {
         const cheapest = inStock.sort((a, b) => a.price - b.price)[0];
         if (cheapest) note(`cheapest in stock: "${cheapest.name}" $${cheapest.price} → tariff_id ${cheapest._id}`);
     } else {
-        bad(`cannot reach the API — ${describeError(tariffs)}`);
+        bad(`cannot reach the API - ${describeError(tariffs)}`);
         console.log('\n  Stopping: nothing else can pass while the API is unreachable.\n');
         process.exit(1);
     }
 
-    // 2. The key itself.
-    console.log('\n2. Authentication');
+    // 2. Region stock and feature counts (public, read-only).
+    console.log('\n2. Region stock + feature counts');
+    const stock = await call('/free-modems?country_id=*');
+    if (stock.status === 200 && Array.isArray(stock.body?.data)) {
+        const rows = stock.body.data;
+        const shapeOk = rows.every((r) => Number.isInteger(r.count) && Number.isInteger(r.p0f_count)
+            && r.p0f_count >= 0 && r.p0f_count <= r.count);
+        if (shapeOk) {
+            const p0fRows = rows.filter((r) => r.p0f_count > 0);
+            ok(`${rows.length} region rows; ${p0fRows.length} hold p0f units (p0f_count > 0)`);
+            if (p0fRows[0]) {
+                const r = p0fRows[0];
+                note(`p0f buy example: tariff for carrier ${r.carrier_id}, body {"region_id":"${r.region_id}","require":["p0f"]}`);
+            }
+        } else {
+            bad('a /free-modems row lacks an integer p0f_count between 0 and count');
+        }
+    } else {
+        bad(`cannot read /free-modems - ${describeError(stock)}`);
+    }
+    const featureShapeOk = tariffs.body.data.every((t) => {
+        const f = t.features;
+        return f && Number.isInteger(f.p0f?.count) && typeof f.p0f?.all === 'boolean' && f.p0f.count <= (t.stock ?? 0)
+            && Number.isInteger(f.openvpn?.count) && typeof f.openvpn?.all === 'boolean';
+    });
+    if (featureShapeOk) {
+        const withP0f = tariffs.body.data.filter((t) => t.features.p0f.count > 0).length;
+        ok(`every tariff carries features.p0f and features.openvpn; ${withP0f} tariffs have p0f stock`);
+    } else {
+        bad('a /tariffs/available row lacks features.p0f {count, all} or features.openvpn {count, all}');
+    }
+
+    if (!KEY) {
+        console.log('\n  CORONIUM_API_KEY is not set: the public checks above ran, the account checks did not.\n');
+        console.log('  Get your key at https://dashboard.coronium.io → Your Account → API Access, then:');
+        console.log('    CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs\n');
+        process.exit(1);
+    }
+
+    // 3. The key itself.
+    console.log('\n3. Authentication');
     const account = await call('/account');
     if (account.status === 200) {
-        ok(`key accepted${account.body?.login ? ` — ${account.body.login}` : ''}`);
+        ok(`key accepted${account.body?.login ? ` - ${account.body.login}` : ''}`);
     } else {
-        bad(`key rejected — ${describeError(account)}`);
+        bad(`key rejected - ${describeError(account)}`);
         note('Copy a fresh JWT from dashboard.coronium.io → Your Account → API Access.');
     }
 
-    // 3. Spending power — a valid key with an empty balance still cannot buy.
-    console.log('\n3. Balance');
+    // 4. Spending power - a valid key with an empty balance still cannot buy.
+    console.log('\n4. Balance');
     if (account.status === 200) {
         ok(`account credit: $${account.body?.accountCredit ?? 0}; BTC and USDT balances available separately`);
         note(`BTC: ${account.body?.btc?.balance ?? 0}; USDT: ${account.body?.usdt?.balance ?? 0}`);
@@ -95,8 +127,8 @@ async function main() {
         bad('cannot read balances until account authentication succeeds');
     }
 
-    // 4. Inventory + how it maps to your customers.
-    console.log('\n4. Your proxies');
+    // 5. Inventory + how it maps to your customers.
+    console.log('\n5. Your proxies');
     const proxies = await call('/account/proxies');
     if (proxies.status === 200) {
         const list = proxies.body?.data || [];
@@ -106,43 +138,50 @@ async function main() {
         });
         note(`${tagged.length} carry a metadata.customer_id, ${list.length - tagged.length} are unattributed`);
         if (list.length > tagged.length) {
-            note('Unattributed proxies are usually auto-swap replacements: metadata is NOT');
-            note('copied onto a replacement. Re-stamp with PUT /modems/{id}/set-metadata.');
+            note('Re-stamp unattributed proxies with PUT /modems/{id}/set-metadata.');
+        }
+        const featureless = list.filter((p) => typeof p.features?.openvpn?.available !== 'boolean');
+        if (featureless.length === 0) {
+            const vpn = list.filter((p) => p.features.openvpn.available).length;
+            ok(`every proxy carries features.openvpn.available (${vpn} of ${list.length} offer OpenVPN)`);
+            if (vpn) note('A line set up in the last 2 h may answer 503 openvpn_profile_pending: retry after Retry-After, never replace.');
+        } else {
+            bad(`${featureless.length} proxies lack features.openvpn.available`);
         }
     } else {
-        bad(`cannot list proxies — ${describeError(proxies)}`);
+        bad(`cannot list proxies - ${describeError(proxies)}`);
     }
 
-    // 5. Health — the endpoint you poll instead of probing proxies yourself.
-    console.log('\n5. Proxy health');
+    // 6. Health - the endpoint you poll instead of probing proxies yourself.
+    console.log('\n6. Proxy health');
     const health = await call('/account/proxies/health');
     if (health.status === 200) {
         const s = health.body?.summary || {};
-        ok(`health readable — active:${s.active ?? 0} degraded:${s.degraded ?? 0} dead:${s.dead ?? 0} expired:${s.expired ?? 0}`);
+        ok(`health readable - active:${s.active ?? 0} degraded:${s.degraded ?? 0} dead:${s.dead ?? 0} expired:${s.expired ?? 0}`);
     } else {
-        bad(`cannot read health — ${describeError(health)}`);
+        bad(`cannot read health - ${describeError(health)}`);
     }
 
-    // 6. Webhook — the difference between knowing a modem died and not.
-    console.log('\n6. Webhook');
+    // 7. Webhook - the difference between knowing a modem died and not.
+    console.log('\n7. Webhook');
     const webhook = await call('/account/webhook');
     if (webhook.status !== 200) {
-        bad(`cannot read webhook config — ${describeError(webhook)}`);
+        bad(`cannot read webhook config - ${describeError(webhook)}`);
     } else if (webhook.body?.webhook_url) {
         const url = new URL(webhook.body.webhook_url);
         ok(`registered: ${url.origin}${url.pathname}`);
         if (RUN_WEBHOOK_TEST) {
             const test = await call('/account/webhook/test', { method: 'POST' });
             if (test.status === 200) {
-                ok(`test event delivered — ${JSON.stringify(test.body)}`);
+                ok(`test event delivered - ${JSON.stringify(test.body)}`);
             } else {
-                bad(`test event failed — ${describeError(test)}`);
+                bad(`test event failed - ${describeError(test)}`);
             }
         } else {
             note('Re-run with --webhook-test to fire a real signed event at it.');
         }
     } else {
-        bad('no webhook_url registered — you will not be told when a modem dies');
+        bad('no webhook_url registered - you will not be told when a modem dies');
         note("PUT /account/webhook with {\"webhook_url\":\"https://your-host/...\"} (HTTPS, public).");
     }
 

@@ -1,6 +1,6 @@
 # Billing, carrier and webhook receipt
 
-Everything you need to reconcile a purchase or renewal **from the response alone** — no
+Everything you need to reconcile a purchase or renewal **from the response alone** - no
 second API call, no database lookup.
 
 Applies to the two balance lanes, which is what resellers use:
@@ -28,11 +28,11 @@ Applies to the two balance lanes, which is what resellers use:
 ```
 
 `result`, `charged_usd`, `currency` and `data` have never changed shape. `billing` and
-`webhook` are additive — safe to ignore if you don't need them.
+`webhook` are additive - safe to ignore if you don't need them.
 
 ---
 
-## `billing` — what you were charged, and why
+## `billing` - what you were charged, and why
 
 ```jsonc
 {
@@ -60,7 +60,7 @@ Applies to the two balance lanes, which is what resellers use:
     "value": "10%",
     "amount_usd": 9.9
   },
-  "charged_usd": 89.1,              // price AFTER coupon — what actually left your balance
+  "charged_usd": 89.1,              // price AFTER coupon - what actually left your balance
 
   "balance_before_usd": 500,        // account_credit lane; null on crypto
   "balance_after_usd": 410.9,
@@ -77,7 +77,7 @@ This is the part you asked for, explicitly:
 - **discount applied** → `billing.discount.amount_usd` (and `.code` / `.type` / `.value`)
 - **with coupon / actually charged** → `billing.charged_usd`
 
-### Invariants — these always hold to the cent
+### Invariants - these always hold to the cent
 
 ```
 Σ line_items[].line_total_usd == subtotal_usd
@@ -87,7 +87,7 @@ charged_usd == top-level charged_usd
 ```
 
 Sub-cent rounding residue is folded onto the **last** line item, so the sum always
-reconciles exactly — you never have to tolerate a 1-cent drift.
+reconciles exactly - you never have to tolerate a 1-cent drift.
 
 `discount.amount_usd` is the **observed** delta (`subtotal - charged`), not a
 recomputation of the coupon rule. If a coupon partially applies, the number still ties out.
@@ -122,7 +122,7 @@ because the lane settles in BTC.
 ### When `billing` is absent
 
 Only on a genuine `200`. It never appears on `202`, `4xx` or `5xx`. That does **not** mean
-no money moved — reconcile by `paymentId` whenever an answer carries one:
+no money moved - reconcile by `paymentId` whenever an answer carries one:
 
 | Answer | Money | What to do |
 |---|---|---|
@@ -136,7 +136,7 @@ Refunds always go to your Coronium account balance, never back to a card or wall
 
 ---
 
-## `carrier` — required for correct renewal pricing
+## `carrier` - required for correct renewal pricing
 
 Every proxy in `data[]`, and every proxy from `GET /api/v3/account/proxies`, now carries:
 
@@ -151,13 +151,13 @@ Every proxy in `data[]`, and every proxy from `GET /api/v3/account/proxies`, now
 > Before 2026-07-27 the API returned only a bare `carrier_id` with no name, because
 > carriers live embedded inside the country document and nothing resolved them. If your
 > renewal-options logic filters by carrier, that filter silently never fired and you could
-> offer the cheapest same-country plan across **all** carriers — e.g. quoting a $99/mo
-> France Free modem at the $79/mo LycaMobile price, with your cost floor blind to the real
+> offer the cheapest same-country plan across **all** carriers - e.g. quoting a $99/mo
+> plan on one French carrier at another carrier's $79/mo price, with your cost floor blind to the real
 > cost. Filter on `carrier._id`, and price against the plan for that carrier.
 
 ---
 
-## `webhook` — will an event arrive for this order?
+## `webhook` - will an event arrive for this order?
 
 ```jsonc
 "webhook": {
@@ -174,14 +174,14 @@ Every proxy in `data[]`, and every proxy from `GET /api/v3/account/proxies`, now
 | `configured` | `false` ⇒ you have no `https` webhook URL registered, so **no event is coming**. Fix with `PUT /api/v3/account/webhook`. |
 | `event_id` | The id the delivered event will carry. **Correlate on this**, and dedupe on it. |
 | `status` | About our **outbox**: `queued` (durably recorded) · `not_configured` · `disabled` · `error` |
-| `delivery` | The outbox row's state at response time — normally `pending`, because delivery happens after this response is already on the wire. |
+| `delivery` | The outbox row's state at response time - normally `pending`, because delivery happens after this response is already on the wire. |
 
 **`status: "queued"` does not mean delivered.** It means the event is durably stored and the
 delivery worker owns it. Treat the webhook POST as the delivery signal; treat `event_id` as
 the correlation key.
 
 This exists so "Coronium never sent it" and "our receiver is down" stop looking identical.
-If `configured` is `false`, stop debugging your receiver — nothing was ever going to arrive.
+If `configured` is `false`, stop debugging your receiver - nothing was ever going to arrive.
 
 ---
 
@@ -189,7 +189,7 @@ If `configured` is `false`, stop debugging your receiver — nothing was ever go
 
 ```js
 const r = await buy({ tariff_id, modemCount: 1, coupon: { coupon_name: 'SAVE10' } });
-if (!r.billing.discount) console.warn('coupon was not applied — charged list price');
+if (!r.billing.discount) console.warn('coupon was not applied - charged list price');
 
 // what you paid, and the margin you have to price against
 const cost   = r.billing.charged_usd;
@@ -205,13 +205,13 @@ const carrier = r.data[0].carrier;          // {_id, name, code}
 
 // know whether to expect a webhook, and what to match it on
 if (r.webhook.configured) awaitEvent(r.webhook.event_id);
-else console.warn('no webhook URL registered — register one or poll instead');
+else console.warn('no webhook URL registered - register one or poll instead');
 ```
 
 ---
 
 ## Related
 
-- [webhook-integration.md](webhook-integration.md) — envelope, signature, event catalogue, retries
-- [pricing-markup.md](pricing-markup.md) — turning `charged_usd` into your customer price
+- [webhook-integration.md](webhook-integration.md) - envelope, signature, event catalogue, retries
+- [pricing-markup.md](pricing-markup.md) - turning `charged_usd` into your customer price
 - Live API reference: <https://api.coronium.io/api-docs>

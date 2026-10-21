@@ -7,7 +7,7 @@ as the foundation. Scaffold me a reseller dashboard for Coronium mobile 4G/5G
 proxies with these features (skip any I don't list):
 
 - Customer list (CRUD on end-customers stored locally)
-- Buy proxies on a customer's behalf — pick country/carrier, attach customer_id
+- Buy proxies on a customer's behalf - pick country/carrier, attach customer_id
   via the metadata field, show resulting credentials
 - Per-customer detail page with their proxies + health status + credential copy
 - Signed webhook handler at /api/coronium/webhook: verify HMAC, persist by
@@ -16,7 +16,7 @@ proxies with these features (skip any I don't list):
 - Health overview: poll /account/proxies/health every 60s, highlight dead modems
 - API-only integration instructions: Bearer authentication, account balances,
   tariff stock with X-Coronium-Proxy-Credentials: separate-protocol-v1 on stock
-  and purchase calls, renewal quote, renewal, separate PocketProxy endpoints,
+  and purchase calls, renewal quote, renewal, separate HTTP/SOCKS5 endpoints,
   idempotency, and the raw Swagger reference at https://dashboard.coronium.io/api-docs/
 
 My CORONIUM_API_KEY is in .env. Deploy target: a self-hosted persistent volume.
@@ -34,7 +34,7 @@ Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/
 and https://dashboard.coronium.io/api-docs/. Build a Node CLI directly against
 the REST API using Bearer auth and server-side secrets. It should list tariffs,
 show account credit and BTC separately, buy with a stable Idempotency-Key,
-quote and renew an owned modem, and display PocketProxy HTTP/SOCKS5 endpoints
+quote and renew an owned modem, and display separate HTTP/SOCKS5 endpoints
 separately. Store customer mappings durably. No dashboard is required.
 ```
 

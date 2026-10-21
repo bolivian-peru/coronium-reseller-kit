@@ -27,6 +27,7 @@ export function BuyForm({
     const [customer_id, setCustomerId] = useState(defaultCustomerId || '');
     const [count, setCount] = useState(1);
     const [tag, setTag] = useState('');
+    const [needP0f, setNeedP0f] = useState(false);
     const [lane, setLane] = useState<'account_credit' | 'crypto_btc'>('account_credit');
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<any>(null);
@@ -40,13 +41,15 @@ export function BuyForm({
         () => tariffs.find((t) => t._id === tariff_id),
         [tariffs, tariff_id]
     );
+    // The API's own count: what a buy with require: ["p0f"] can get on this plan.
+    const p0fCount: number = selectedTariff?.features?.p0f?.count ?? 0;
 
     async function buy(e: React.FormEvent) {
         e.preventDefault();
         setBusy(true);
         setErr(null);
         setResult(null);
-        const payload = { tariff_id, modemCount: count, customer_id, tag: tag || null, lane };
+        const payload = { tariff_id, modemCount: count, customer_id, tag: tag || null, lane, need_p0f: needP0f && p0fCount > 0 };
         const serialized = JSON.stringify(payload);
         const storageKey = `coronium-pending-buy:${serialized}`;
         let intent: { key: string; createdAt: number } | null = null;
@@ -92,7 +95,7 @@ export function BuyForm({
                 <label className="flex flex-col gap-1">
                     <span className="text-xs uppercase text-zinc-400 tracking-wide">Country</span>
                     <select className="input" value={country} onChange={(e) => { setCountry(e.target.value); setTariffId(''); }} required>
-                        <option value="">— pick a country —</option>
+                        <option value="">- pick a country -</option>
                         {countries.map((c) => (
                             <option key={c.code} value={c.code}>{c.name}</option>
                         ))}
@@ -102,10 +105,10 @@ export function BuyForm({
                 <label className="flex flex-col gap-1">
                     <span className="text-xs uppercase text-zinc-400 tracking-wide">Tariff</span>
                     <select className="input" value={tariff_id} onChange={(e) => setTariffId(e.target.value)} required disabled={!country}>
-                        <option value="">{country ? '— pick a plan —' : 'pick a country first'}</option>
+                        <option value="">{country ? '- pick a plan -' : 'pick a country first'}</option>
                         {tariffsForCountry.map((t) => (
                             <option key={t._id} value={t._id}>
-                                {t.name} — ${t.price} · stock {t.stock}
+                                {t.name} - ${t.price} · stock {t.stock}
                             </option>
                         ))}
                     </select>
@@ -114,9 +117,9 @@ export function BuyForm({
                 <label className="flex flex-col gap-1">
                     <span className="text-xs uppercase text-zinc-400 tracking-wide">Customer</span>
                     <select className="input" value={customer_id} onChange={(e) => setCustomerId(e.target.value)} required>
-                        <option value="">— pick customer —</option>
+                        <option value="">- pick customer -</option>
                         {customers.map((c) => (
-                            <option key={c.id} value={c.id}>{c.id} — {c.name}</option>
+                            <option key={c.id} value={c.id}>{c.id} - {c.name}</option>
                         ))}
                     </select>
                 </label>
@@ -127,7 +130,7 @@ export function BuyForm({
                 </label>
 
                 <label className="flex flex-col gap-1 md:col-span-2">
-                    <span className="text-xs uppercase text-zinc-400 tracking-wide">Tag (optional — goes into metadata)</span>
+                    <span className="text-xs uppercase text-zinc-400 tracking-wide">Tag (optional - goes into metadata)</span>
                     <input className="input" placeholder="eg tiktok-batch, april-campaign" value={tag} onChange={(e) => setTag(e.target.value)} />
                 </label>
 
@@ -138,6 +141,14 @@ export function BuyForm({
                         <option value="crypto_btc">BTC wallet</option>
                     </select>
                 </label>
+
+                {selectedTariff && (
+                    <label className="md:col-span-2 flex items-center gap-2 text-sm text-zinc-300">
+                        <input type="checkbox" checked={needP0f && p0fCount > 0} disabled={p0fCount === 0}
+                            onChange={(e) => setNeedP0f(e.target.checked)} />
+                        Need OS fingerprint (p0f) - available on {p0fCount} of {selectedTariff.stock ?? 0}
+                    </label>
+                )}
 
                 {selectedTariff && (
                     <div className="md:col-span-2 text-sm text-zinc-400">
