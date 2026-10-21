@@ -75,7 +75,7 @@ Refusals come before any charge or reservation:
 ```json
 HTTP 409
 { "error": "No p0f-capable proxies are available for this plan right now. Nothing was charged.",
-  "code": "p0f_unavailable", "reason_code": "P0F_UNAVAILABLE",
+  "code": "p0f_unavailable",
   "suggested_action": "pick_region_with_p0f_count_or_retry_later",
   "retryable": false, "request_id": "req_..." }
 ```
@@ -83,7 +83,7 @@ HTTP 409
 ```json
 HTTP 400
 { "error": "Unknown purchase requirement. \"require\" must be a list of: p0f. Nothing was charged.",
-  "code": "unknown_requirement", "reason_code": "UNKNOWN_REQUIREMENT",
+  "code": "unknown_requirement",
   "supported": ["p0f"], "suggested_action": "use_supported_requirements",
   "retryable": false, "request_id": "req_..." }
 ```
@@ -110,15 +110,16 @@ curl -fsS -H "Authorization: Bearer $CORONIUM_API_KEY" \
 Answers:
 
 - `200` - the `.ovpn` file.
-- `503 openvpn_profile_pending`, with a `Retry-After` header (120 s) - a line set up
+- `503 openvpn_profile_pending` (`retry_with_backoff`, `retryable: true`), with a
+  `Retry-After: 120` header - a line set up
   in the last 2 hours whose profile is still being issued. Wait for `Retry-After` and
   retry the **same** line. It is usually ready within minutes. **Never replace the
   line for this**: a new line starts a new wait.
-- `409 openvpn_not_supported` - this line has no OpenVPN (`features.openvpn.available`
+- `409 openvpn_not_supported` (`check_capabilities`, `retryable: false`) - this line has no OpenVPN (`features.openvpn.available`
   is false). Do not retry.
-- `400 openvpn_disabled` - OpenVPN is switched off for this line. Do not retry;
+- `400 openvpn_disabled` (`contact_support`, `retryable: false`) - OpenVPN is switched off for this line. Do not retry;
   contact support if you need it.
-- `502 openvpn_unavailable` - the profile could not be fetched. Retry once later,
+- `502 openvpn_unavailable` (`contact_support`, `retryable: true`) - the profile could not be fetched. Retry once later,
   then contact support with the `request_id`.
 
 ```js
@@ -129,5 +130,7 @@ const profile = await coronium.proxies.openvpn(modemId);
 ## 4. Error envelope
 
 Every `/api/v3` error carries `error`, `code`, `suggested_action`, `retryable` and
-`request_id` (also the `X-Request-Id` header), plus `reason_code` when the original
-code was renamed. Branch on `code`; quote `request_id` to support.
+`request_id` (also the `X-Request-Id` header). `reason_code` appears only when the
+API renamed the original code (for example `no_stock` carries `reason_code:
+"OUT_OF_STOCK"`). None of the p0f or OpenVPN codes on this page carry one. Branch on
+`code`; quote `request_id` to support.
