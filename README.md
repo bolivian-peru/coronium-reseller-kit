@@ -6,13 +6,13 @@
 
 If you're an AI agent scaffolding a reseller dashboard, **read these first** in this order:
 
-1. [`AGENTS.md`](./AGENTS.md) — hard rules, architecture template, failure-mode table
-2. [`llms.txt`](./llms.txt) — concise machine-readable surface
-3. [`PROMPT.md`](./PROMPT.md) — paste-ready prompts (Next.js / CLI / webhook-only / Telegram-bot variants)
-4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) — working foundation, copy and modify
-5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) — the auto-swap event flow
+1. [`AGENTS.md`](./AGENTS.md) - hard rules, architecture template, failure-mode table
+2. [`llms.txt`](./llms.txt) - concise machine-readable surface
+3. [`PROMPT.md`](./PROMPT.md) - paste-ready prompts (Next.js / CLI / webhook-only / Telegram-bot variants)
+4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) - working foundation, copy and modify
+5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) - the auto-swap event flow
 
-Authoritative API reference — interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
+Authoritative API reference - interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
 
 ## For humans
 
@@ -37,11 +37,12 @@ ask me before any paid test purchase.
 
 | Surface | Purpose |
 |---|---|
-| `examples/verify-integration.mjs` | Read-only smoke test for key, separate balances, PocketProxy-aware stock and webhook configuration |
-| `examples/nextjs-dashboard/` | Self-hosted Next.js operator dashboard — customer mapping, PocketProxy-aware stock, purchase/renewal, signed webhook inbox |
+| `examples/verify-integration.mjs` | Read-only smoke test for key, separate balances, stock, p0f and OpenVPN fields and webhook configuration |
+| `examples/nextjs-dashboard/` | Self-hosted Next.js operator dashboard - customer mapping, stock, purchase with optional p0f, renewal, signed webhook inbox |
 | `examples/webhook-receiver/` | Durable signed event receiver for resellers with their own CRM worker |
 | `docs/reseller-quickstart.md` | Zero → revenue path, 7 steps |
 | `docs/webhook-integration.md` | Auto-swap event flow contract |
+| `docs/p0f-and-openvpn.md` | Find p0f stock per region, buy with `require: ["p0f"]`, OpenVPN download answers |
 | `docs/metadata-strategy.md` | Customer mapping via `metadata` plus a small local swap-recovery index |
 | `docs/pricing-markup.md` | 2026 market rates + economics |
 
@@ -52,15 +53,17 @@ ask me before any paid test purchase.
 | `GET /api/v3/account/proxies` | List proxies you own |
 | `GET /api/v3/account` | Account credit, BTC and USDT balances |
 | `GET /api/v3/account/proxies/health` | Per-proxy `is_alive` + `recommendation` |
-| `GET /api/v3/tariffs/available` | In-stock tariffs (filtered by country/carrier) |
-| `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id` |
-| `POST /api/v3/payment/buy-with-account-credit` | Buy using USD account credit |
+| `GET /api/v3/tariffs/available` | In-stock tariffs, with `features.p0f.count` and `features.openvpn.count` per plan |
+| `GET /api/v3/free-modems` | Stock per country, carrier and region, with `p0f_count` per region |
+| `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id`, optional `require: ["p0f"]` |
+| `POST /api/v3/payment/buy-with-account-credit` | Buy using USD account credit, optional `require: ["p0f"]` |
 | `POST /api/v3/payment/renewal-quote` | Read-only renewal price for owned proxies |
 | `POST /api/v3/payment/renew-with-account-credit` | Explicit renewal using account credit |
 | `POST /api/v3/payment/renew-modems-with-crypto-balance` | Explicit renewal using BTC balance |
-| `POST /api/v3/modems/{id}/restart` | Rotate IP. Synchronous — always 200, branch on `rotated` |
+| `POST /api/v3/modems/{id}/restart` | Rotate IP. Synchronous - always 200, branch on `rotated` |
 | `PUT /api/v3/modems/{id}/set-rotation-interval` | Auto-rotate every N **seconds** (min 60, 0 disables) |
 | `POST /api/v3/modems/{id}/replace` | Swap broken proxy (same country, transferred subscription time) |
+| `GET /api/v3/modems/{id}/openvpn` | Download the `.ovpn` profile. `503 openvpn_profile_pending` = retry after `Retry-After`, never replace |
 | `PUT /api/v3/modems/{id}/set-metadata` | Re-stamp customer mapping (needed after an auto-swap) |
 | `GET /api/v3/modems/rotate-modem-by-token/{token}` | Token-auth rotation for end-customer scripts. 200 only on a verified new IP |
 | `PUT /api/v3/account/webhook` | Register HTTPS webhook for account events |
@@ -69,9 +72,17 @@ ask me before any paid test purchase.
 
 Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Your Account → API Access.
 
-PocketProxy is **not** opt-in. Without any header you are offered, and sold, PocketProxy units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses farmer consent, health checks or rental-term coverage, and an order with `autoRenew: true` is never filled from PocketProxy. `proxyEndpoints.provider` is an opaque label: never branch on it. Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (PocketProxy does not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
+No header is needed to see stock. Without any header you are offered, and sold, units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses supplier consent, health checks or rental-term coverage, and an order with `autoRenew: true` is only filled from units that support it. `proxyEndpoints.provider` is an opaque label: never branch on it. Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (some line types do not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
 
 Coupons, including any reseller discount on your account, apply on both the account-credit and the BTC lane. Send `"coupon": {"coupon_name": "..."}` and read the result from `billing.discount`.
+
+### OS fingerprint (p0f) and OpenVPN
+
+- `/free-modems` rows carry `p0f_count` and `/tariffs/available` plans carry `features.p0f.count`. Both are what a buy with `require: ["p0f"]` can get, counted only on units whose OS change has been seen on the wire.
+- Add `require: ["p0f"]` to any v3 buy body to get only units with p0f. No such unit: `409 p0f_unavailable`. Any other value: `400 unknown_requirement` with `supported: ["p0f"]`. Nothing is charged or reserved either way.
+- OpenVPN: check `features.openvpn.available` on the line. A line set up in the last 2 hours may answer `503 openvpn_profile_pending` with `Retry-After`: wait and retry the same line, never replace it. `409 openvpn_not_supported` and `400 openvpn_disabled` are final.
+
+Details and examples: [docs/p0f-and-openvpn.md](docs/p0f-and-openvpn.md).
 
 **Missing stock compared with the dashboard?** Read [stock and credential negotiation](docs/stock-and-credentials.md) for the exact header, term selection, cache rules and protocol credentials.
 
@@ -98,14 +109,16 @@ Every 4xx/5xx on `/api/v3` carries:
 
 ```json
 {
-  "error": "No free modems",
-  "code": "OUT_OF_STOCK",
+  "error": "This plan is out of stock right now. Nothing was charged - please pick another carrier or try again shortly.",
+  "code": "no_stock",
+  "reason_code": "OUT_OF_STOCK",
   "suggested_action": "retry_later_or_different_tariff",
+  "retryable": false,
   "request_id": "req_MZpmKb_FCA"
 }
 ```
 
-`error` is the human string, `code` the machine identifier. Log `request_id` (also returned as the `X-Request-Id` header) and quote it in support tickets. Out of stock is **409 with `code: "no_stock"`** on `/api/v3` (the same answer carries `reason_code: "OUT_OF_STOCK"`, the spelling `/api/v1` and the `proxy.purchase_failed` webhook use; branch on either). Do not retry-loop or switch products without asking the buyer.
+`error` is the human string, `code` the machine identifier. Log `request_id` (also returned as the `X-Request-Id` header) and quote it in support tickets. Out of stock is **409 with `code: "no_stock"`** on `/api/v3` (the same answer carries `reason_code: "OUT_OF_STOCK"`, the spelling `/api/v1` and the `proxy.purchase_failed` webhook use; branch on either). Do not retry-loop or switch products without asking the buyer. A buy with `require: ["p0f"]` refused for lack of p0f units answers `409 p0f_unavailable` instead.
 
 ## Core integration pattern (read this once)
 
@@ -122,11 +135,11 @@ POST /api/v3/payment/buy-modems-with-crypto-balance
 }
 ```
 
-`modemCount` is the field name — `modem_count` and `count` are ignored, and the request fails with `Bad modem count`. Country and carrier come from the **tariff**; sending them in the body does nothing. Send `metadata` pre-stringified: it is a string column server-side. Keep the same `Idempotency-Key` and exact body on every retry of one order.
+`modemCount` is the field name - `modem_count` and `count` are ignored, and the request fails with `Bad modem count`. Country and carrier come from the **tariff**; sending them in the body does nothing. Send `metadata` pre-stringified: it is a string column server-side. Keep the same `Idempotency-Key` and exact body on every retry of one order.
 
 Every `GET /account/proxies` returns the same `metadata` verbatim. Filter client-side by `customer_id`. Full pattern in [`docs/metadata-strategy.md`](./docs/metadata-strategy.md).
 
-The 200 also carries an itemized `billing` block (`line_items`, `subtotal_usd`, `discount`, `charged_usd`, `settlement`) so you can reconcile the charge without a second call — **price before coupon** is `subtotal_usd`, **price after coupon** is `charged_usd`, and every figure ties out to the cent. Plus a `webhook` receipt telling you whether an event is coming and which `event_id` to match it on.
+The 200 also carries an itemized `billing` block (`line_items`, `subtotal_usd`, `discount`, `charged_usd`, `settlement`) so you can reconcile the charge without a second call - **price before coupon** is `subtotal_usd`, **price after coupon** is `charged_usd`, and every figure ties out to the cent. Plus a `webhook` receipt telling you whether an event is coming and which `event_id` to match it on.
 
 Each proxy also carries `carrier: {_id, name, code}` when resolvable. **Quote renewals with `POST /payment/renewal-quote`** for the exact owned modem and term before charging; a country-only tariff estimate can be wrong.
 
@@ -154,7 +167,7 @@ When a supported modem is auto-replaced, Coronium transfers its remaining paid t
 }
 ```
 
-Reading `body.old_modem_id` gives `undefined` — it lives at `body.data.old_modem_id`. Deliveries are signed (`X-Coronium-Signature`) and retried up to 8 times, so verify the signature and dedupe on `event_id`. Every replacement (automatic, your own `POST /modems/:id/replace`, or by support) sends `modem.replaced` and carries `metadata` to the new proxy; re-stamping it is harmless and keeps older lines safe.
+Reading `body.old_modem_id` gives `undefined` - it lives at `body.data.old_modem_id`. Deliveries are signed (`X-Coronium-Signature`) and retried up to 8 times, so verify the signature and dedupe on `event_id`. Every replacement (automatic, your own `POST /modems/:id/replace`, or by support) sends `modem.replaced` and carries `metadata` to the new proxy; re-stamping it is harmless and keeps older lines safe.
 
 If no replacement is available, you may get `modem.dead` with `new_modem_id: null` and a `reason` code. You also receive purchase, purchase-failure, renewal and expiry events. Full event spec in [`docs/webhook-integration.md`](./docs/webhook-integration.md).
 
@@ -168,7 +181,7 @@ Treat active proxies as customer-owned service. Check current ownership and capa
 2. **Use HTTPS for your webhook URL.** HTTP returns 400, and so does any private or non-resolving host.
 3. **Persist the signed webhook durably before acknowledging it within 5 seconds.** Non-2xx is retried; dedupe on `event_id` and process from a durable inbox.
 4. **Verify `X-Coronium-Signature`** over the raw request bytes before trusting a payload.
-5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST — `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice.
+5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice.
 6. **Rotation is synchronous and answers 200 on failure.** Branch on `rotated`, not on the status code.
 7. **`rotation_interval` is in SECONDS**, minimum 60, `0` disables. Passing minutes gets a 400.
 8. **Don't reinvent auto-swap or health logic.** Both are server-side, battle-tested.

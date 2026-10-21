@@ -3,7 +3,7 @@
  *
  * Runs SERVER-SIDE only (Next.js Route Handlers). The JWT in CORONIUM_API_KEY
  * never reaches the browser. If you find yourself importing this from a
- * `'use client'` component, you've made a mistake — refactor through a
+ * `'use client'` component, you've made a mistake - refactor through a
  * `/api/coronium/*` route handler.
  */
 
@@ -19,7 +19,7 @@ if (!/^https:\/\//i.test(BASE) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//
 if (!KEY) {
     // We don't throw here so the dev server still boots; the API key check
     // happens per-request so the UI can show a clear setup screen.
-    console.warn('[coronium] CORONIUM_API_KEY not set — paste it into .env to enable API calls');
+    console.warn('[coronium] CORONIUM_API_KEY not set - paste it into .env to enable API calls');
 }
 
 function headers() {
@@ -43,13 +43,17 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
     if (!r.ok) {
         // Every /api/v3 4xx/5xx carries the reseller error envelope:
-        // { error, code, suggested_action, request_id, documentation_url? }.
+        // { error, code, reason_code?, suggested_action, retryable, request_id }.
         // `error` is the human string, `code` the machine identifier. Quote
         // request_id (also on the X-Request-Id header) when opening a ticket.
         const err: any = new Error(body?.error || `Coronium ${r.status}`);
         err.status = r.status;
         err.code = body?.code;
         err.suggested_action = body?.suggested_action;
+        err.retryable = body?.retryable;
+        // A 503/429 may say when to come back (e.g. openvpn_profile_pending: 120 s).
+        const retryAfter = Number(r.headers.get('retry-after'));
+        err.retry_after_seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
         err.request_id = body?.request_id || r.headers.get('x-request-id');
         err.body = body;
         throw err;
@@ -79,10 +83,16 @@ export interface Proxy {
     rotation_interval?: number;  // SECONDS between auto-rotations; 0 = disabled
     isOnline?: boolean;
     carrier?: { _id: string; name: string; code?: string } | null;
+    /** Per-line capabilities. `openvpn.available: false` means GET /openvpn will refuse. */
+    features?: {
+        p0f?: { server_supported: boolean; current_os: string; supported_values: string[] };
+        openvpn?: { available: boolean; download_url: string | null };
+        native_ipv6?: boolean;
+    };
     /**
      * Per-protocol connection details. Present on proxies delivered under a
      * credential contract; absent on legacy rows (use the flat fields then).
-     * `provider` is an opaque label that can gain new values at any time —
+     * `provider` is an opaque label that can gain new values at any time -
      * never branch on it. Branch on `capabilities`.
      */
     proxyEndpoints?: {
@@ -150,6 +160,26 @@ export interface Tariff {
     carrier_id?: string;
     carrier_name?: string;
     stock?: number;
+    /**
+     * Per-feature availability in this plan's stock. `count` = units that have it,
+     * `all` = every unit has it. `p0f.count` is exactly what a buy with
+     * `require: ["p0f"]` can get on this plan.
+     */
+    features?: {
+        p0f: { count: number; all: boolean };
+        openvpn: { count: number; all: boolean };
+        ipv6_native: boolean;
+    };
+}
+
+/** One /free-modems row: available units per country, carrier and region. */
+export interface StockRow {
+    country_id: string;
+    carrier_id: string;
+    region_id: string | null;
+    count: number;
+    /** How many of `count` a buy with `require: ["p0f"]` and this region_id can get. */
+    p0f_count: number;
 }
 
 export interface BuyResult {
@@ -182,7 +212,7 @@ export const coronium = {
         list: () => call<{ data: Proxy[] }>('/account/proxies'),
         health: () => call<HealthResponse>('/account/proxies/health'),
         /**
-         * Rotate a modem's IP. This call is SYNCHRONOUS — it holds the request
+         * Rotate a modem's IP. This call is SYNCHRONOUS - it holds the request
          * open until the carrier has actually handed out a new IP, then tells
          * you what happened.
          *
@@ -202,8 +232,37 @@ export const coronium = {
         replace: (id: string) =>
             call<any>(`/modems/${id}/replace`, { method: 'POST' }),
         /**
+         * Download the line's .ovpn profile (text). Check `features.openvpn.available`
+         * on the line first: when it is false the call refuses.
+         *
+         * A line set up in the last 2 hours may still be getting its profile:
+         * 503 `openvpn_profile_pending` with `Retry-After` (120 s). Wait and retry
+         * the SAME line. Never replace it for this - a new line starts a new wait.
+         * Stop (do not retry) on 409 `openvpn_not_supported` and 400
+         * `openvpn_disabled`. 502 `openvpn_unavailable` is worth one later retry.
+         */
+        openvpn: async (id: string, { maxAttempts = 4 } = {}): Promise<string> => {
+            for (let attempt = 1; ; attempt++) {
+                const r = await fetch(`${BASE}/modems/${encodeURIComponent(id)}/openvpn`, {
+                    headers: { Authorization: `Bearer ${KEY}` }, cache: 'no-store',
+                });
+                if (r.ok) return r.text();
+                let body: any = null;
+                try { body = await r.json(); } catch { /* not JSON */ }
+                const wait = Number(r.headers.get('retry-after')) || 120;
+                if (body?.code === 'openvpn_profile_pending' && attempt < maxAttempts) {
+                    await new Promise((resolve) => setTimeout(resolve, Math.min(wait, 600) * 1000));
+                    continue;
+                }
+                const err: any = new Error(body?.error || `Coronium ${r.status}`);
+                Object.assign(err, { status: r.status, code: body?.code, suggested_action: body?.suggested_action,
+                    request_id: body?.request_id || r.headers.get('x-request-id'), retry_after_seconds: wait });
+                throw err;
+            }
+        },
+        /**
          * Auto-rotate every N SECONDS. Minimum 60; 0 disables. Sending minutes
-         * here (e.g. 5 meaning "5 minutes") is rejected with a 400 — anything
+         * here (e.g. 5 meaning "5 minutes") is rejected with a 400 - anything
          * between 1 and 59 is invalid.
          */
         setRotationInterval: (id: string, seconds: number) =>
@@ -221,32 +280,51 @@ export const coronium = {
     tariffs: {
         listAvailable: () => call<{ data: Tariff[] }>('/tariffs/available'),
     },
+    stock: {
+        /** Grouped by country, carrier and region. Public. Not a reservation. */
+        byRegion: (query: { country_id?: string; carrier_id?: string; region_id?: string; period?: 'day' | 'week' | 'month' } = {}) => {
+            const params = new URLSearchParams({ country_id: '*', ...query } as Record<string, string>);
+            return call<{ data: StockRow[] }>(`/free-modems?${params}`);
+        },
+    },
     payment: {
         /**
          * Buy `modemCount` proxies on the tariff. Country and carrier come from
-         * the TARIFF — sending them in the body does nothing.
+         * the TARIFF - sending them in the body does nothing.
          *
          * `idempotencyKey` must be ONE stable key per buy intent, reused across
          * every retry of that intent. Replaying it within 24h returns the
          * original response (with `X-Idempotency-Replay: true`) instead of
-         * provisioning — and charging — a second time. Generate it once, at the
+         * provisioning - and charging - a second time. Generate it once, at the
          * point the human clicks Buy, never per HTTP attempt.
          */
         buy: (
-            args: { tariff_id: string; modemCount: number; metadata?: Record<string, any>; coupon?: string },
+            args: {
+                tariff_id: string; modemCount: number; metadata?: Record<string, any>; coupon?: string;
+                /** Pin the region. Pick one whose /free-modems row has stock (or p0f_count when requiring p0f). */
+                region_id?: string;
+                /**
+                 * Features every proxy in the order must have. Only `p0f` exists today.
+                 * No qualifying unit: 409 `p0f_unavailable`, nothing charged or reserved.
+                 * Any other value: 400 `unknown_requirement` (`supported: ["p0f"]`).
+                 */
+                require?: Array<'p0f'>;
+            },
             lane: 'account_credit' | 'crypto_btc',
             idempotencyKey: string
         ) =>
             call<BuyResult>(lane === 'account_credit' ? '/payment/buy-with-account-credit' : '/payment/buy-modems-with-crypto-balance', {
                 method: 'POST',
-                // metadata is a String column server-side — send it pre-stringified
+                // metadata is a String column server-side - send it pre-stringified
                 // so it round-trips as the same JSON you sent.
                 body: JSON.stringify({
                     tariff_id: args.tariff_id,
                     modemCount: args.modemCount,
+                    ...(args.region_id ? { region_id: args.region_id } : {}),
+                    ...(args.require?.length ? { require: args.require } : {}),
                     ...(args.metadata ? { metadata: JSON.stringify(args.metadata) } : {}),
                     // Coupons apply on both balance lanes. The charged price
-                    // is whatever `billing.charged_usd` says — never compute it.
+                    // is whatever `billing.charged_usd` says - never compute it.
                     ...(args.coupon ? { coupon: { coupon_name: args.coupon } } : {}),
                 }),
                 headers: { 'Idempotency-Key': idempotencyKey },

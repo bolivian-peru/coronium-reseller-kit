@@ -36,9 +36,9 @@ export default function CustomersPage() {
                                         <Link href={`/customers/${c.id}`} className="text-emerald-400 hover:underline">{c.id}</Link>
                                     </td>
                                     <td className="py-2">{c.name}</td>
-                                    <td className="py-2 text-zinc-400">{c.email || '—'}</td>
-                                    <td className="py-2 text-zinc-400">{c.markup_pct != null ? `${c.markup_pct}%` : '—'}</td>
-                                    <td className="py-2 text-zinc-400 text-xs">{c.notes?.slice(0, 60) || '—'}</td>
+                                    <td className="py-2 text-zinc-400">{c.email || '-'}</td>
+                                    <td className="py-2 text-zinc-400">{c.markup_pct != null ? `${c.markup_pct}%` : '-'}</td>
+                                    <td className="py-2 text-zinc-400 text-xs">{c.notes?.slice(0, 60) || '-'}</td>
                                     <td className="py-2 text-right">
                                         <DeleteButton id={c.id} />
                                     </td>

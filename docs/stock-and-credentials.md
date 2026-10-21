@@ -1,6 +1,6 @@
 # Seeing all eligible inventory
 
-PocketProxy is **not** opt-in. Without any header you are offered, and sold, PocketProxy units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses farmer consent, health checks or rental-term coverage, and an order with `autoRenew: true` is never filled from PocketProxy.
+No header is needed to see stock. Without any header you are offered, and sold, units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses supplier consent, health checks or rental-term coverage, and an order with `autoRenew: true` is only filled from units that support it.
 
 This is not a separate account balance, permission tier or extra authentication.
 To be offered every eligible unit, set this on your server-side API client for
@@ -18,8 +18,8 @@ curl 'https://api.coronium.io/api/v3/tariffs/available' \
 ```
 
 Use the exact tariff period (`day`, `week`, `month`). The header adds the
-separate-login PocketProxy units to the inventory you are offered; it does not bypass
-farmer consent, health/readiness, sold-device protection or term coverage. Existing
+separate-login units to the inventory you are offered; it does not bypass
+supplier consent, health/readiness, sold-device protection or term coverage. Existing
 owned proxies remain visible with or without the header.
 
 Whenever a delivered proxy carries `proxyEndpoints`, read `proxyEndpoints.http`
@@ -52,6 +52,9 @@ If stock differs between your integration and the dashboard:
    are excluded from `/tariffs/available`; historical `/tariffs` is not a stock list.
 5. Sum the grouped `/free-modems` counts for inventory totals, not tariff stock:
    day/week/month plans can all reference the same devices.
+6. For p0f, read each row's `p0f_count` (and `features.p0f.count` per plan). It is
+   what a buy with `require: ["p0f"]` and that `region_id` can get. See
+   [p0f and OpenVPN](p0f-and-openvpn.md).
 
 The [interactive API reference](https://dashboard.coronium.io/api-docs/) includes
 the header on stock and purchase operations. Run `examples/verify-integration.mjs`

@@ -1,16 +1,16 @@
 # Webhook integration
 
-The auto-swap event flow — the most important integration for a reseller.
+The auto-swap event flow - the most important integration for a reseller.
 
 ## What problem this solves
 
-Mobile modems fail. Phones overheat, SIMs deactivate, carrier networks reroute, ProxySmart hosts go offline. Without auto-swap, your customers experience random outages and blame you.
+Mobile modems fail. Phones overheat, SIMs deactivate, carrier networks reroute, host servers go offline. Without auto-swap, your customers experience random outages and blame you.
 
 With the Coronium webhook flow:
 
 1. Coronium detects an eligible failed modem with remaining paid time
 2. If the provider and stock support replacement, Coronium provisions a replacement
-3. The original `tariff_expired_at` is transferred — your customer doesn't lose paid time
+3. The original `tariff_expired_at` is transferred - your customer doesn't lose paid time
 4. The old modem is quarantined to a system bucket
 5. Coronium POSTs an event to your webhook URL with old + new modem IDs and full credentials
 6. Your handler updates the customer's record with the new credentials
@@ -40,9 +40,9 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
   -H "Authorization: Bearer $CORONIUM_API_KEY"
 ```
 
-This POSTs a real signed `webhook.test` event to your registered URL **synchronously** and returns the actual delivery outcome — the HTTP status your endpoint replied with, plus latency. Run it on every deploy. Without it, "we never get events" is indistinguishable from "our endpoint has been 500ing for a month".
+This POSTs a real signed `webhook.test` event to your registered URL **synchronously** and returns the actual delivery outcome - the HTTP status your endpoint replied with, plus latency. Run it on every deploy. Without it, "we never get events" is indistinguishable from "our endpoint has been 500ing for a month".
 
-## The envelope — every event has the same shape
+## The envelope - every event has the same shape
 
 ```json
 {
@@ -54,11 +54,11 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 }
 ```
 
-**Event-specific fields live under `data`.** Reading `body.old_modem_id` returns `undefined` — it is `body.data.old_modem_id`. Dedupe on `event_id`.
+**Event-specific fields live under `data`.** Reading `body.old_modem_id` returns `undefined` - it is `body.data.old_modem_id`. Dedupe on `event_id`.
 
 ## Event types
 
-### `modem.replaced` — a proxy was replaced (automatically, by your Replace call, or by support)
+### `modem.replaced` - a proxy was replaced (automatically, by your Replace call, or by support)
 
 ```json
 {
@@ -87,7 +87,7 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 
 Same payload for every replacement. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
 
-### `modem.dead` — auto-swap couldn't complete
+### `modem.dead` - auto-swap couldn't complete
 
 ```json
 {
@@ -111,12 +111,12 @@ Same payload for every replacement. The replacement carries the remaining paid t
 | `proxy.renewed` | same as purchased |
 | `proxy.purchase_failed` | `{order_id, amount_usd, requested, reason_code, reason, retryable, retry_after_seconds, refund}`; inspect the refund receipt before any retry |
 | `proxy.expired` | `{proxy}` |
-| `deposit.confirmed` | `{amount_usd, provider, external_id}` — a balance top-up cleared |
-| `webhook.test` | `{message}` — only from the test endpoint |
+| `deposit.confirmed` | `{amount_usd, provider, external_id}` - a balance top-up cleared |
+| `webhook.test` | `{message}` - only from the test endpoint |
 
 Each entry in `proxies[]` is `{proxy_id, modem_id, country, carrier, http_port, socks_port, ext_ip, expires_at}`.
 
-> The `PUT /account/webhook` response also advertises `proxy.expiring_soon`. **It never fires** — the code path that would emit it has no callers. Don't build advance-expiry logic on it; poll `tariff_expired_at` from `/account/proxies` instead.
+> The `PUT /account/webhook` response also advertises `proxy.expiring_soon`. **It never fires** - the code path that would emit it has no callers. Don't build advance-expiry logic on it; poll `tariff_expired_at` from `/account/proxies` instead.
 
 ## Knowing an event is coming, before it arrives
 
@@ -126,14 +126,14 @@ Every purchase/renew `200` now carries a `webhook` receipt:
 "webhook": {
   "configured": true,
   "event": "proxy.purchased",
-  "event_id": "3f1a…-uuid",   // the id the delivered event will carry — match on this
+  "event_id": "3f1a…-uuid",   // the id the delivered event will carry - match on this
   "status": "queued",          // outbox state, NOT delivery
   "delivery": "pending"
 }
 ```
 
 `configured: false` means you have no `https` webhook URL registered and **no event will ever
-arrive** — register one with `PUT /api/v3/account/webhook`. This exists so "Coronium never
+arrive** - register one with `PUT /api/v3/account/webhook`. This exists so "Coronium never
 sent it" stops looking identical to "our receiver is down".
 
 `status: "queued"` never claims delivery; it means the event is durably in the outbox and the
@@ -141,11 +141,11 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
 
 ## Delivery semantics
 
-- **Signed.** Every POST carries `X-Coronium-Signature: sha256=<hex>` — an HMAC-SHA256 of the raw body under your signing secret — plus `X-Coronium-Signature-Source` (`account` or `global`), `X-Coronium-Event-Id` and `User-Agent: Coronium-Webhooks/1.0`. Create or rotate your own secret with `POST /api/v3/account/webhook/secret/rotate` (shown once) and verify it (see below).
-- **Durable, with retries.** Up to **8 attempts** (immediately, then after 5 s, 30 s, 5 min, 30 min, 2 h, 6 h and 24 h; the last about 32.6 h after the first), then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent — dedupe on `event_id`.
+- **Signed.** Every POST carries `X-Coronium-Signature: sha256=<hex>` - an HMAC-SHA256 of the raw body under your signing secret - plus `X-Coronium-Signature-Source` (`account` or `global`), `X-Coronium-Event-Id` and `User-Agent: Coronium-Webhooks/1.0`. Create or rotate your own secret with `POST /api/v3/account/webhook/secret/rotate` (shown once) and verify it (see below).
+- **Durable, with retries.** Up to **8 attempts** (immediately, then after 5 s, 30 s, 5 min, 30 min, 2 h, 6 h and 24 h; the last about 32.6 h after the first), then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent - dedupe on `event_id`.
 - **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried. (`POST /account/webhook/test` waits up to 8 s.)
 - **Redirects are not followed.** Register the final URL.
-- **Cooldown per modem** on the dead-modem path — you won't get two swap events for the same modem back-to-back.
+- **Cooldown per modem** on the dead-modem path - you won't get two swap events for the same modem back-to-back.
 - **No ordering guarantee.** Use `occurred_at` and fresh proxy state before changing customer assignments.
 
 ## Security checklist for your receiver
@@ -200,7 +200,7 @@ app.post('/api/coronium/webhook', async (req, res) => {
 });
 
 async function process(evt) {
-    // Skip anything we've already handled — retries and replays are normal.
+    // Skip anything we've already handled - retries and replays are normal.
     if (await alreadyProcessed(evt.event_id)) return;
 
     const data = evt.data;
@@ -210,7 +210,7 @@ async function process(evt) {
         // was stamped when you bought it).
         const customer = await findCustomerByOldModemId(data.old_modem_id);
 
-        // Update mapping atomically — single write, single source of truth.
+        // Update mapping atomically - single write, single source of truth.
         await updateCustomer(customer.id, {
             modem_id: data.new_modem_id,
             host: data.new_modem.host,
@@ -221,7 +221,7 @@ async function process(evt) {
             tariff_expired_at: data.new_modem.tariff_expired_at,
         });
 
-        // The replacement has no metadata — re-stamp it so /account/proxies
+        // The replacement has no metadata - re-stamp it so /account/proxies
         // still tells you who owns this proxy.
         await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
 
@@ -274,4 +274,4 @@ The webhook covers REACTIVE auto-swap (modem died → replace). For PROACTIVE de
 
 ## Why not WebSockets / SSE?
 
-WebSockets require both sides to maintain a persistent connection — a webhook URL only needs to be online when an event fires, which is rare (most resellers see <10 events/month). For events that need real-time push (sub-second), use the `/account/proxies/health` polling path with a 30s interval.
+WebSockets require both sides to maintain a persistent connection - a webhook URL only needs to be online when an event fires, which is rare (most resellers see <10 events/month). For events that need real-time push (sub-second), use the `/account/proxies/health` polling path with a 30s interval.

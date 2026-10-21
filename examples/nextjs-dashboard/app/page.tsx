@@ -1,5 +1,5 @@
 /**
- * Reseller home — proxy inventory grouped by end-customer, with health overlay.
+ * Reseller home - proxy inventory grouped by end-customer, with health overlay.
  *
  * Server component: fetches everything server-side via the lib/coronium.ts
  * wrapper. No CORONIUM_API_KEY ever touches the browser.
@@ -82,7 +82,7 @@ export default async function HomePage() {
                                     <>
                                         <Link href={`/customers/${cid}`} className="text-emerald-400 hover:underline">{cid}</Link>
                                         {localCustomerById.get(cid)?.name && (
-                                            <span className="text-zinc-400 text-sm ml-2">— {localCustomerById.get(cid)!.name}</span>
+                                            <span className="text-zinc-400 text-sm ml-2">- {localCustomerById.get(cid)!.name}</span>
                                         )}
                                     </>
                                 )
@@ -106,7 +106,7 @@ export default async function HomePage() {
                                 return (
                                     <tr key={p._id} className="border-t border-zinc-800">
                                         <td className="py-2 font-mono text-xs">{p.name}</td>
-                                        <td className="py-2 font-mono text-xs">{p.ext_ip || '—'}</td>
+                                        <td className="py-2 font-mono text-xs">{p.ext_ip || '-'}</td>
                                         <td className="py-2 font-mono text-xs text-zinc-400">{p.http_port}/{p.socks_port}</td>
                                         <td className="py-2">
                                             {h ? <HealthBadge h={h} /> : <span className="badge badge-muted">unknown</span>}
@@ -114,7 +114,7 @@ export default async function HomePage() {
                                         <td className="py-2 text-xs text-zinc-400">
                                             {p.tariff_expired_at
                                                 ? new Date(p.tariff_expired_at).toISOString().slice(0, 10)
-                                                : '—'}
+                                                : '-'}
                                         </td>
                                     </tr>
                                 );

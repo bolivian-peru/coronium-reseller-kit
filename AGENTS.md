@@ -1,4 +1,4 @@
-# AGENTS.md — Coronium Reseller Kit
+# AGENTS.md - Coronium Reseller Kit
 
 > Instructions for AI coding agents (Claude Code, Cursor, Windsurf, Aider, etc.)
 > tasked with building a reseller dashboard or automation against the Coronium
@@ -6,28 +6,29 @@
 
 ## TL;DR for the agent
 
-You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G proxies — they buy wholesale from Coronium, mark up, sell to their own customers. Your job is to give them a working dashboard + webhook handler so they can run that business without a backend team.
+You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G proxies - they buy wholesale from Coronium, mark up, sell to their own customers. Your job is to give them a working dashboard + webhook handler so they can run that business without a backend team.
 
 **Read these in order, then start coding:**
 
-1. This file (`AGENTS.md`) — orientation + hard rules
-2. `examples/nextjs-dashboard/` — copy-paste foundation
-3. `docs/webhook-integration.md` — the auto-swap event flow
-4. `docs/metadata-strategy.md` — metadata plus the durable local mapping needed for swaps
-5. Coronium reseller API — authoritative interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
+1. This file (`AGENTS.md`) - orientation + hard rules
+2. `examples/nextjs-dashboard/` - copy-paste foundation
+3. `docs/webhook-integration.md` - the auto-swap event flow
+4. `docs/metadata-strategy.md` - metadata plus the durable local mapping needed for swaps
+5. `docs/p0f-and-openvpn.md` - p0f stock per region, `require: ["p0f"]` on buy, OpenVPN download answers
+6. Coronium reseller API - authoritative interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
 
 ## The minimum-viable reseller dashboard has six features
 
 When the user asks for a dashboard, deliver these. Anything beyond is bonus.
 
-1. **API key setup** — read the key from a server-side environment variable; protect the operator dashboard before hosting it
-2. **Proxy inventory** — list all proxies the reseller has bought, grouped by their `metadata.customer_id`
-3. **Buy proxies** — form to buy N proxies in a chosen country/carrier and attach them to a chosen end-customer (writes `metadata.customer_id`)
-4. **Webhook endpoint** — POST handler at `/api/coronium/webhook` that processes `modem.replaced` and `modem.dead` events
-5. **Customer record view for the operator** — page per end-customer showing assigned proxies and separate HTTP/SOCKS5 credentials. A public end-customer portal needs its own tenant authentication.
-6. **Health check** — call `/account/proxies/health` and surface dead proxies before the end-customer hits them
+1. **API key setup** - read the key from a server-side environment variable; protect the operator dashboard before hosting it
+2. **Proxy inventory** - list all proxies the reseller has bought, grouped by their `metadata.customer_id`
+3. **Buy proxies** - form to buy N proxies in a chosen country/carrier and attach them to a chosen end-customer (writes `metadata.customer_id`)
+4. **Webhook endpoint** - POST handler at `/api/coronium/webhook` that processes `modem.replaced` and `modem.dead` events
+5. **Customer record view for the operator** - page per end-customer showing assigned proxies and separate HTTP/SOCKS5 credentials. A public end-customer portal needs its own tenant authentication.
+6. **Health check** - call `/account/proxies/health` and surface dead proxies before the end-customer hits them
 
-## Hard rules — do not violate
+## Hard rules - do not violate
 
 **Renewals: call `POST /payment/renewal-quote` for the exact owned modem and term.**
 Do not estimate from a country or carrier tariff. Explicit renewal exists on account-credit
@@ -44,23 +45,25 @@ arrive and your fulfilment flow must poll instead of wait.
 2. **Use `metadata.customer_id` for customer mapping and a small durable local recovery index.** Metadata is returned in proxy lists but is not inherited by replacements. Keep old modem ID → customer ID until a swap is reconciled.
 3. **Register the webhook URL via `PUT /api/v3/account/webhook` exactly once on first deploy.** Don't re-PUT every request. Store the registration in the reseller's own state (config file, env, KV) so you know when it's already configured.
 4. **Authenticate via Bearer header** for any new code you write. `?auth_token=` query-param also works but logs to access.log everywhere; Bearer is the right pattern.
-5. **Stock-out is normal.** `/api/v3` answers `409` with `code: "no_stock"` (and `reason_code: "OUT_OF_STOCK"`). Surface it clearly; do not retry-loop.
-6. **Idempotency** — `/payment/*` POSTs accept an `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, 24h window; a replay answers with `X-Idempotency-Replay: true`). Generate ONE UUID per buy *intent* — at the moment the human confirms — and resend that same key on every retry. A key derived from a timestamp changes between attempts and buys twice.
-7. **Handle auto-swap only where supported.** Fields are under `data`. Verify HMAC, persist the event, ack within 5 seconds, then notify your customer. The replacement already carries your `metadata`; re-stamping is harmless. PocketProxy's current capabilities do not advertise replacement.
-8. **Rotation is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** — branch on `rotated`, never on the status code. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
-9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 — a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
+5. **Stock-out is normal.** `/api/v3` answers `409` with `code: "no_stock"` (and `reason_code: "OUT_OF_STOCK"`). A buy with `require: ["p0f"]` and no p0f unit answers `409 p0f_unavailable`. Surface both clearly; do not retry-loop. Read `p0f_count` (`/free-modems`) or `features.p0f.count` (`/tariffs/available`) to offer only regions and plans that can fill it.
+6. **Idempotency** - `/payment/*` POSTs accept an `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, 24h window; a replay answers with `X-Idempotency-Replay: true`). Generate ONE UUID per buy *intent* - at the moment the human confirms - and resend that same key on every retry. A key derived from a timestamp changes between attempts and buys twice.
+7. **Handle auto-swap only where supported.** Fields are under `data`. Verify HMAC, persist the event, ack within 5 seconds, then notify your customer. The replacement already carries your `metadata`; re-stamping is harmless. Some line types do not advertise replacement; check `proxyEndpoints.capabilities.replace`.
+8. **Rotation is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** - branch on `rotated`, never on the status code. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
+9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 - a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
 10. **`metadata` is a JSON string, and it is NOT inherited by auto-swap replacements.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamp the new modem with `PUT /modems/{new_modem_id}/set-metadata` or that proxy is permanently unattributed.
-11. **PocketProxy needs no opt-in.** Without a header you get units with one login on both ports. `X-Coronium-Proxy-Credentials: separate-protocol-v1` (optional) also offers units with separate HTTP/SOCKS5 logins; then use `proxyEndpoints.http` and `.socks5` independently. Use the same contract and rental period throughout discovery and checkout. See `docs/stock-and-credentials.md`.
+11. **No stock header is required.** Without a header you get units with one login on both ports. `X-Coronium-Proxy-Credentials: separate-protocol-v1` (optional) also offers units with separate HTTP/SOCKS5 logins; then use `proxyEndpoints.http` and `.socks5` independently. Use the same contract and rental period throughout discovery and checkout. See `docs/stock-and-credentials.md`.
 12. **Never branch on `proxyEndpoints.provider`.** It is an opaque label and new values appear without notice. Use `proxyEndpoints.capabilities` to decide which actions to show, and do not display the provider label to end-customers.
 13. **Coupons work on both balance lanes.** Pass `coupon: {coupon_name}` on quote, purchase and renewal; confirm from `billing.discount` that it applied. Never compute a discounted price yourself.
 14. **Secrets stay out of logs and the client.** That includes the API key, the webhook signing secret, proxy passwords and raw webhook payloads.
 15. **Keep the dashboard private.** The operator sample requires Basic auth and persistent SQLite. It is not a public end-customer login or a serverless one-command deploy.
+16. **OpenVPN pending is not broken.** `GET /modems/{id}/openvpn` on a line set up in the last 2 hours can answer `503 openvpn_profile_pending` with `Retry-After` (120 s). Retry the same line after that wait; never replace it (a new line starts a new wait). `409 openvpn_not_supported` and `400 openvpn_disabled` are final; check `features.openvpn.available` before offering a download.
+17. **Only send `require` values that exist.** Today that is `["p0f"]`. Anything else is `400 unknown_requirement` with `supported: ["p0f"]`.
 
 ## Architecture you should produce
 
 ```
 reseller-dashboard/
-  app/                       (Next.js App Router — recommended; SvelteKit/Remix are also fine)
+  app/                       (Next.js App Router - recommended; SvelteKit/Remix are also fine)
     page.tsx                 # Landing / API-key paste form
     dashboard/
       page.tsx               # Reseller's home: customer list, total proxies, recent webhook events
@@ -81,9 +84,9 @@ reseller-dashboard/
 
 For v1, the reseller's end-customer list is small (10-1000 customers). Don't force Postgres. Use one of:
 
-- **SQLite** (`better-sqlite3`) — single file, zero ops, instantly backupable
-- **Vercel KV / Upstash** — if deploying serverless
-- **JSON file** — for prototypes
+- **SQLite** (`better-sqlite3`) - single file, zero ops, instantly backupable
+- **Vercel KV / Upstash** - if deploying serverless
+- **JSON file** - for prototypes
 
 Schema for a customer:
 
@@ -93,7 +96,7 @@ type Customer = {
   name: string;
   email?: string;
   created_at: number;
-  markup_pct?: number;   // optional — for display only, doesn't affect Coronium pricing
+  markup_pct?: number;   // optional - for display only, doesn't affect Coronium pricing
   notes?: string;
 };
 ```
@@ -102,7 +105,7 @@ The proxies themselves stay in Coronium. The reseller's DB holds end-customer pr
 
 ## Webhook contract (the most important section)
 
-Every event shares ONE envelope. The event-specific fields are nested under `data` — this is the single most common integration bug, because `body.old_modem_id` silently reads `undefined`.
+Every event shares ONE envelope. The event-specific fields are nested under `data` - this is the single most common integration bug, because `body.old_modem_id` silently reads `undefined`.
 
 ```json
 {
@@ -149,14 +152,14 @@ When stock is unavailable in the geo, `modem.dead` with:
 }
 ```
 
-You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore `proxy.expiring_soon` — the `PUT /account/webhook` response lists it, but nothing emits it.
+You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore `proxy.expiring_soon` - the `PUT /account/webhook` response lists it, but nothing emits it.
 
 **Handler must:**
 
-1. Verify `X-Coronium-Signature` (`sha256=<hmac-sha256 of the RAW body>`) against the account's signing secret, over the raw bytes — not the re-serialized JSON
+1. Verify `X-Coronium-Signature` (`sha256=<hmac-sha256 of the RAW body>`) against the account's signing secret, over the raw bytes - not the re-serialized JSON
 2. Persist the event keyed by `event_id`, then acknowledge within the 5s timeout. Return non-2xx if storage fails.
 3. Process from the durable inbox: update mapping `data.old_modem_id → data.new_modem_id`, **re-stamp metadata on the new modem**, notify your end-customer with new credentials
-4. Be idempotent, keyed on `event_id` — a non-2xx is retried up to 8 times with backoff, and Coronium can replay dead-lettered events
+4. Be idempotent, keyed on `event_id` - a non-2xx is retried up to 8 times with backoff, and Coronium can replay dead-lettered events
 
 ## Hard-coded values worth knowing
 
@@ -166,19 +169,19 @@ You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore 
 - Webhook delivery: 5s timeout, up to 8 attempts with escalating backoff, then dead-letter; HMAC-signed via `X-Coronium-Signature` + `X-Coronium-Event-Id`; redirects not followed
 - Detection cadence: every 30 min, threshold 5 consecutive failed health checks
 - Refresh cadence for `/account/proxies/health`: 30 min server-side (cache client-side 30-60s)
-- `GET /tariffs/available` needs no auth — handy as a connectivity check
-- Error envelope on 4xx/5xx: `{error, code, suggested_action, request_id, documentation_url?}` + `X-Request-Id` header. No `message` field
+- `GET /tariffs/available` needs no auth - handy as a connectivity check
+- Error envelope on 4xx/5xx: `{error, code, reason_code?, suggested_action, retryable, request_id, documentation_url?}` + `X-Request-Id` header. No `message` field
 - Currency: USD throughout; cents for Stripe payments, dollars for crypto/balance
 
 ## When user asks for features beyond the minimum
 
 Common requests and the right answer:
 
-- **"Add Telegram bot"** — separate service, share the same `lib/coronium.ts` client. See `examples/telegram-bot` (Phase 2, may not exist yet).
-- **"Add per-customer billing"** — calculate `customer.markup_pct × modem.price` in your dashboard. Charge them via your own payment processor (Stripe/PayPal). Coronium doesn't bill end-customers; you do.
-- **"Show usage stats per customer"** — Coronium doesn't expose bandwidth-per-modem on the reseller API. If they need this, point them at the Pool Gateway product (different SKU, different SDK at `@proxies-sx/pool-sdk`).
-- **"Add OAuth login for end-customers"** — out of scope for v1; the reseller owns auth on their side.
-- **"Wallet integration"** — if the reseller wants end-customers to pay in crypto, integrate a wallet on the reseller's side, then top up the reseller's Coronium balance with the net amount.
+- **"Add Telegram bot"** - separate service, share the same `lib/coronium.ts` client. See `examples/telegram-bot` (Phase 2, may not exist yet).
+- **"Add per-customer billing"** - calculate `customer.markup_pct × modem.price` in your dashboard. Charge them via your own payment processor (Stripe/PayPal). Coronium doesn't bill end-customers; you do.
+- **"Show usage stats per customer"** - Coronium doesn't expose bandwidth-per-modem on the reseller API. If they need this, point them at the Pool Gateway product (different SKU, different SDK at `@proxies-sx/pool-sdk`).
+- **"Add OAuth login for end-customers"** - out of scope for v1; the reseller owns auth on their side.
+- **"Wallet integration"** - if the reseller wants end-customers to pay in crypto, integrate a wallet on the reseller's side, then top up the reseller's Coronium balance with the net amount.
 
 ## Failure modes to handle gracefully
 
@@ -186,12 +189,16 @@ Common requests and the right answer:
 |---|---|---|
 | `401 Unauthorized` on any call | API key invalid or expired | Show "reauthorize" UI; user pastes a fresh key |
 | `409 OUT_OF_STOCK` on buy | No eligible proxy for that tariff now | Ask buyer to choose another product; don't retry-loop |
+| `409 p0f_unavailable` on buy with `require: ["p0f"]` | No p0f unit in that plan or region now | Pick one with `p0f_count` / `features.p0f.count` above 0; nothing was charged |
+| `400 unknown_requirement` | `require` holds something other than `"p0f"` | Send `["p0f"]` or leave it out |
+| `503 openvpn_profile_pending` | New line's OpenVPN profile still being issued | Wait `Retry-After`, retry the same line; never replace |
+| `409 openvpn_not_supported` / `400 openvpn_disabled` | Line has no OpenVPN | Do not retry; hide the download for that line |
 | `400 BAD_MODEM_COUNT` | You sent `modem_count`/`count`, or a non-positive number | The field is `modemCount` |
 | `400` on set-rotation-interval | Value between 1 and 59 | The unit is SECONDS; minimum 60, or 0 to disable |
 | `200` with `rotated: false` | Rotation ran but the IP did not change | Retry after a few seconds; if it persists, `/replace` the modem |
 | `429` on rotate-by-token | Inside the ~60 s per-modem cooldown | Back off; don't hammer |
-| Webhook fields all `undefined` | You're reading the top level | They're under `data` — `body.data.old_modem_id` |
-| Webhook never fires after a modem dies | No webhook URL set, or your endpoint is failing | Run `POST /account/webhook/test` — it returns your endpoint's actual response |
+| Webhook fields all `undefined` | You're reading the top level | They're under `data` - `body.data.old_modem_id` |
+| Webhook never fires after a modem dies | No webhook URL set, or your endpoint is failing | Run `POST /account/webhook/test` - it returns your endpoint's actual response |
 | `modem.dead` with `reason: "no_stock"` | We tried to swap, couldn't find replacement geo | Notify your customer, retry-`replace` manually later |
 | Swapped proxy shows as unassigned | Metadata isn't carried onto replacements | Re-stamp via `PUT /modems/{id}/set-metadata` in your webhook handler |
 
@@ -201,7 +208,7 @@ Show the user:
 
 1. **Local URL** to open in their browser
 2. **Deploy command** for a persistent host. If using serverless, first replace the local SQLite store with a durable shared database.
-3. **Webhook registration command** — the one-liner curl or fetch to PUT their dashboard URL into Coronium
-4. **An authorized test purchase** — with the account owner's permission and funding, show credentials in the UI and prove the proxy connects. Never silently spend their balance.
+3. **Webhook registration command** - the one-liner curl or fetch to PUT their dashboard URL into Coronium
+4. **An authorized test purchase** - with the account owner's permission and funding, show credentials in the UI and prove the proxy connects. Never silently spend their balance.
 
 Don't claim "done" until the test purchase succeeded and the proxy is visible in the reseller's UI.

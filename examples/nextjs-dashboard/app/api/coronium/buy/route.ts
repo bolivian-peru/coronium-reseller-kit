@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
     let body: any = null;
     try { body = await req.json(); } catch {}
-    const { tariff_id, modemCount = 1, customer_id, tag, idempotency_key, lane = 'account_credit' } = body || {};
+    const { tariff_id, modemCount = 1, customer_id, tag, idempotency_key, lane = 'account_credit', need_p0f = false } = body || {};
 
     if (!tariff_id || !customer_id) {
         return NextResponse.json(
@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
     if (!Number.isInteger(modemCount) || modemCount < 1 || modemCount > 20 ||
         !/^[0-9a-f-]{36}$/i.test(idempotency_key || '') ||
         !['account_credit', 'crypto_btc'].includes(lane) ||
+        typeof need_p0f !== 'boolean' ||
         (tag != null && (typeof tag !== 'string' || tag.length > 128))) {
         return NextResponse.json({ error: 'Invalid count, lane, tag or idempotency key' }, { status: 400 });
     }
@@ -40,9 +41,12 @@ export async function POST(req: NextRequest) {
                 modemCount,
                 // The metadata field tags the proxy with YOUR customer id, so
                 // /account/proxies alone tells you who each proxy belongs to.
-                // It is NOT carried onto the replacement when a dead modem is
-                // auto-swapped — see docs/metadata-strategy.md.
+                // Replacements carry it to the new proxy; keep a local index
+                // anyway - see docs/metadata-strategy.md.
                 metadata,
+                // Every unit must have OS fingerprint (p0f) control. With none in
+                // stock the API answers 409 p0f_unavailable and charges nothing.
+                ...(need_p0f ? { require: ['p0f' as const] } : {}),
             },
             lane,
             idempotency_key
@@ -57,7 +61,9 @@ export async function POST(req: NextRequest) {
         return NextResponse.json(result);
     } catch (e: any) {
         return NextResponse.json(
-            { error: e.message, code: e.code, request_id: e.request_id },
+            // p0f_unavailable (409): this plan has no p0f unit right now; pick a plan
+            // whose features.p0f.count > 0 or untick "need p0f". Nothing was charged.
+            { error: e.message, code: e.code, suggested_action: e.suggested_action, request_id: e.request_id },
             { status: e.status || 500 }
         );
     }
