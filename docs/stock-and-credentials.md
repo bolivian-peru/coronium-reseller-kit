@@ -66,7 +66,16 @@ what to show from `capabilities`, not from the label.
   most one request every two minutes.
 - `capabilities.http`, `socks5` and `udp` say which protocols passed qualification of this
   exact device. `whitelist`, `usage` and `speedTest` enable `PUT /modems/{id}/set-white-list`,
-  `GET /modems/{id}/usage` and `/modems/{id}/speed-test`.
+  `GET /modems/{id}/usage` and `/modems/{id}/speed-test`. On a line of any other type these
+  routes answer `404 not_found`.
+  - Whitelist: `{"white_list": [...]}` replaces the list, at most 10 entries, IPv4 `/24`-`/32`
+    or IPv6 `/48`-`/128`. Listed addresses connect without a password on `dedicated_port`
+    (returned in the answer); `[]` removes password-less access.
+  - Usage: `?days=1-366` (default 30) returns `totals` and per-UTC-day rows of the current
+    rental only.
+  - Speed test: `POST` (optional UUIDv4 `request_id`) answers `202`; poll `GET` for
+    `down_mbps`, `up_mbps`, `latency_ms`. One test per 10 minutes per proxy (`429` with
+    `Retry-After`).
 - Refused with `409 action_unsupported` and nothing changed: `set-rotation-interval`,
   `replace`, `apply-settings`, `test`. `cancel` answers `409 cancel_unsupported`.
 - OpenVPN (only when `capabilities.openvpn` is true) downloads once per profile; see

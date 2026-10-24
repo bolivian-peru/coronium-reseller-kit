@@ -2,7 +2,7 @@
 
 Two per-line features that not every unit has. The API tells you which units have
 them before you buy, lets you require one at checkout, and tells you exactly why a
-download is refused. Synced with OpenAPI 3.3.4 (24 Oct 2026). Full reference:
+download is refused. Synced with OpenAPI 3.3.5 (24 Oct 2026). Full reference:
 <https://api.coronium.io/api-docs/>.
 
 ## 1. Find stock with p0f

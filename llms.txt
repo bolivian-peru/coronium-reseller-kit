@@ -13,7 +13,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 3. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/billing-and-reconciliation.md> - charged amount, coupon before/after, carrier, webhook receipt
 4. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/p0f-and-openvpn.md> - p0f stock per region, `require: ["p0f"]`, OpenVPN download answers
 5. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> - working foundation
-6. <https://api.coronium.io/api-docs/> - authoritative interactive API reference (OpenAPI 3.3.4 / Swagger UI, public)
+6. <https://api.coronium.io/api-docs/> - authoritative interactive API reference (OpenAPI 3.3.5 / Swagger UI, public)
 7. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/CHANGELOG.md> - dated API and kit changes, breaking vs additive
 
 ## API endpoints you'll use

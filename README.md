@@ -12,7 +12,7 @@ If you're an AI agent scaffolding a reseller dashboard, **read these first** in 
 4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) - working foundation, copy and modify
 5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) - the auto-swap event flow
 
-Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required). This kit is synced with OpenAPI **3.3.4** (24 Oct 2026). What changed: [CHANGELOG.md](./CHANGELOG.md).
+Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required). This kit is synced with OpenAPI **3.3.5** (24 Oct 2026). What changed: [CHANGELOG.md](./CHANGELOG.md).
 
 ## For humans
 

@@ -4,6 +4,16 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.10.24b - synced with OpenAPI 3.3.5
+
+Documentation only; no API behaviour changed and no example code changed. These live routes
+are now in the OpenAPI reference with parameters, answers and refusals:
+`PUT /modems/{id}/set-white-list`, `GET /modems/{id}/usage`, `POST`/`GET /modems/{id}/speed-test`
+(Coronium Node lines, see [stock and credentials](docs/stock-and-credentials.md)),
+`POST /modems/{id}/openvpn/revoke`, `GET`/`POST /account/pool/saved`,
+`DELETE /account/pool/saved/{id}`, `POST /account/pool/saved/{id}/url` and
+`GET /pool/stock/carriers/{country}`.
+
 ## 2026.10.24 - synced with OpenAPI 3.3.4
 
 Kit version 2026.10.24. Example packages `0.2.0`.
