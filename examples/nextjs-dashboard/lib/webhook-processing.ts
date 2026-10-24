@@ -20,8 +20,9 @@ export async function reconcileWebhooks() {
                 if (!data.old_modem_id || !data.new_modem_id) throw new Error('Replacement IDs missing');
                 const prior = assignments.get(data.old_modem_id) || assignments.get(data.new_modem_id);
                 if (!prior) throw new Error('Old modem has no customer mapping; operator review required');
-                // Metadata is not copied to the replacement by Coronium. Do
-                // the remote write first; if it fails, the event remains pending.
+                // Coronium copies metadata onto the replacement; re-stamping is a
+                // harmless safety net for lines replaced before October 2026.
+                // Do the remote write first; if it fails, the event remains pending.
                 await coronium.proxies.setMetadata(data.new_modem_id, JSON.parse(prior.metadata));
                 assignments.replace(data.old_modem_id, data.new_modem_id, prior.customer_id, prior.metadata);
             }

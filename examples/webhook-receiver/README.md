@@ -4,10 +4,10 @@ This Express example verifies Coronium's HMAC signature and appends each unique 
 
 ```bash
 npm ci
-CORONIUM_WEBHOOK_SECRET=<signing-secret-from-support> \
+CORONIUM_WEBHOOK_SECRET=<your-signing-secret> \
 LOG_FILE=/persistent-volume/coronium-events.log node server.js
 ```
 
-Expose `/coronium/webhook` through HTTPS and register that exact public URL with `PUT /api/v3/account/webhook`. Then call `POST /api/v3/account/webhook/test` using your Bearer API key. The signature secret is required even for local testing; do not put a secret in the URL. A 200 means the event was stored, **not** that your customers were updated.
+Expose `/coronium/webhook` through HTTPS and register that exact public URL with `PUT /api/v3/account/webhook`. Then call `POST /api/v3/account/webhook/test` using your Bearer API key. Create the signing secret with `POST /api/v3/account/webhook/secret/rotate` (shown once). The signature secret is required even for local testing; do not put a secret in the URL. A 200 means the event was stored, **not** that your customers were updated.
 
 Build a separate idempotent consumer for the JSONL inbox. For `modem.replaced`, use `data.old_modem_id` to find your end-customer, update the assignment, re-stamp the replacement's metadata and notify the customer of new credentials. For `modem.dead` and `proxy.purchase_failed`, open a service review. Keep the event log and consumer state on persistent storage, replay unprocessed events after restarts, and back them up. The included `processEvent` only logs examples; it does not perform those business actions.

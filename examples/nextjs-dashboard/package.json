@@ -1,6 +1,6 @@
 {
   "name": "coronium-reseller-dashboard-example",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Minimal Next.js reseller dashboard for Coronium mobile proxies. Foundation for AI-agent-scaffolded resellers.",
   "scripts": {

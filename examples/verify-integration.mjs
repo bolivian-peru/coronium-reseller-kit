@@ -55,9 +55,17 @@ async function main() {
     if (tariffs.status === 200 && Array.isArray(tariffs.body?.data)) {
         const inStock = tariffs.body.data.filter((t) => (t.stock ?? 0) > 0);
         ok(`API reachable - ${inStock.length} tariffs in stock`);
-        const byCountry = new Map();
+        // Day, week and month plans share devices: count each carrier once
+        // (its largest plan stock), never the sum of its terms.
+        const byCarrier = new Map();
         for (const t of inStock) {
-            byCountry.set(t.country_code, (byCountry.get(t.country_code) || 0) + (t.stock || 0));
+            const k = `${t.country_code}|${t.carrier_id}`;
+            byCarrier.set(k, Math.max(byCarrier.get(k) || 0, t.stock || 0));
+        }
+        const byCountry = new Map();
+        for (const [k, n] of byCarrier) {
+            const c = k.split('|')[0];
+            byCountry.set(c, (byCountry.get(c) || 0) + n);
         }
         const top = [...byCountry.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
         note(top.map(([c, n]) => `${c}:${n}`).join('  '));
@@ -140,6 +148,17 @@ async function main() {
         if (list.length > tagged.length) {
             note('Re-stamp unattributed proxies with PUT /modems/{id}/set-metadata.');
         }
+        // OpenAPI 3.3.2+: features.p0f carries vocabulary (and 3.3.3 unavailable_reason), never provider.
+        const p0fShapeBad = list.filter((p) => !p.features?.p0f || 'provider' in p.features.p0f
+            || !('vocabulary' in p.features.p0f) || !('unavailable_reason' in p.features.p0f));
+        if (p0fShapeBad.length === 0) {
+            const osLines = list.filter((p) => p.features.p0f.server_supported).length;
+            ok(`every proxy carries features.p0f.vocabulary and unavailable_reason (${osLines} of ${list.length} have OS control)`);
+        } else {
+            bad(`${p0fShapeBad.length} proxies have an unexpected features.p0f shape`);
+        }
+        const asyncRows = list.filter((p) => p.proxyEndpoints).length;
+        if (asyncRows) note(`${asyncRows} proxies carry proxyEndpoints: their /restart answers 202, poll rotation-status.`);
         const featureless = list.filter((p) => typeof p.features?.openvpn?.available !== 'boolean');
         if (featureless.length === 0) {
             const vpn = list.filter((p) => p.features.openvpn.available).length;

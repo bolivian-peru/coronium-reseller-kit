@@ -134,7 +134,8 @@ export const assignments = {
     replace(oldId: string, newId: string, customerId: string, metadata: string) {
         db.transaction(() => {
             this.upsert(newId, customerId, metadata);
-            db.prepare('DELETE FROM proxy_assignment WHERE modem_id = ?').run(oldId);
+            // A moved line keeps its id (new_modem_id === old_modem_id): keep the row.
+            if (oldId !== newId) db.prepare('DELETE FROM proxy_assignment WHERE modem_id = ?').run(oldId);
         })();
     },
 };

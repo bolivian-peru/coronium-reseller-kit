@@ -36,6 +36,46 @@ not offered for that proxy: hide the control rather than letting the call fail.
 Proxies without a `proxyEndpoints` object are legacy rows and use the flat
 fields.
 
+## Line types at a glance
+
+| | Classic proxy | Row with `proxyEndpoints` (one-time rental) |
+|---|---|---|
+| Recognise it | No `proxyEndpoints` | `proxyEndpoints` present |
+| Rotation | `POST /restart` answers 200 with `rotated` | `POST /restart` answers **202** `pending: true`; poll `GET /modems/{id}/rotation-status` until `done` or `failed` |
+| Renewal | Explicit renewal; auto-renew where offered | Manual renewal only: `POST /payment/renewal-quote`, then a `/payment/renew-*` route |
+| Replace, cancel | Available | `409`; read `capabilities` |
+| OS fingerprint | Where `features.p0f.server_supported` is true | Never (`400 p0f_unsupported_on_server`) |
+
+`"autoRenew": true` on a buy is never filled from one-time-rental stock. If only such
+units are left the answer is `409 auto_renew_unavailable` (`retry_without_auto_renew`),
+before any charge.
+
+## Coronium Node rows
+
+Coronium Node lines are one-time rentals served from a single device through our gateway.
+They are the one documented `provider` value: the row carries a top-level
+`provider: "coronium_node"` and the same value in `proxyEndpoints.provider`. Still decide
+what to show from `capabilities`, not from the label.
+
+- One login and password on both ports (`credentials: "shared-protocol-v1"`). `proxy_login`
+  is fixed (`cnr_<modem id>`); `PUT /modems/{id}/change-password` takes 8-128 printable
+  ASCII characters without spaces.
+- `providerState` (`tunnel_connected`, `offline`, `unknown`) and `providerObservedAt`
+  (epoch ms) report the device connection. `ext_ip` can be `null` until the device reports.
+- Rotation answers 202. Send a UUIDv4 `request_id` in the body to make a retry safe; at
+  most one request every two minutes.
+- `capabilities.http`, `socks5` and `udp` say which protocols passed qualification of this
+  exact device. `whitelist`, `usage` and `speedTest` enable `PUT /modems/{id}/set-white-list`,
+  `GET /modems/{id}/usage` and `/modems/{id}/speed-test`.
+- Refused with `409 action_unsupported` and nothing changed: `set-rotation-interval`,
+  `replace`, `apply-settings`, `test`. `cancel` answers `409 cancel_unsupported`.
+- OpenVPN (only when `capabilities.openvpn` is true) downloads once per profile; see
+  [p0f and OpenVPN](p0f-and-openvpn.md#5-download-openvpn).
+- An expired rental stays on your account for 24 hours so you can renew it with the same
+  credentials, but it stops accepting connections at expiry.
+
+Full contract: the line-type section of the [API reference](https://api.coronium.io/api-docs/).
+
 Sending the header on every stock and purchase call is recommended if your client
 reads `proxyEndpoints`. It only widens what you are offered.
 
@@ -56,7 +96,7 @@ If stock differs between your integration and the dashboard:
    what a buy with `require: ["p0f"]` and that `region_id` can get. See
    [p0f and OpenVPN](p0f-and-openvpn.md).
 
-The [interactive API reference](https://dashboard.coronium.io/api-docs/) includes
+The [interactive API reference](https://api.coronium.io/api-docs/) includes
 the header on stock and purchase operations. Run `examples/verify-integration.mjs`
 for a read-only check; it already sends the header. A successful stock read is not
 a reservation or proof of a paid purchase. Use an idempotency key per purchase

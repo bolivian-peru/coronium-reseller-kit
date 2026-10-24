@@ -69,7 +69,6 @@ function couponBody(coupon?: string) {
 export interface Proxy {
     _id: string;
     name: string;
-    IMEI?: string;
     http_port: string;
     socks_port: string;
     proxy_login: string;
@@ -85,7 +84,15 @@ export interface Proxy {
     carrier?: { _id: string; name: string; code?: string } | null;
     /** Per-line capabilities. `openvpn.available: false` means GET /openvpn will refuse. */
     features?: {
-        p0f?: { server_supported: boolean; current_os: string; supported_values: string[] };
+        p0f?: {
+            server_supported: boolean;
+            current_os: string;
+            supported_values: string[];
+            /** Which value list the line takes. Replaced `provider` (removed) in OpenAPI 3.3.2. */
+            vocabulary: 'os_profile' | 'tcp_stack' | null;
+            /** Why there is no OS control: the mobile network rewrites it, or anything else. Null when available. */
+            unavailable_reason?: 'mobile_network' | 'line' | null;
+        };
         openvpn?: { available: boolean; download_url: string | null };
         native_ipv6?: boolean;
     };
@@ -93,7 +100,9 @@ export interface Proxy {
      * Per-protocol connection details. Present on proxies delivered under a
      * credential contract; absent on legacy rows (use the flat fields then).
      * `provider` is an opaque label that can gain new values at any time -
-     * never branch on it. Branch on `capabilities`.
+     * never branch on it. Branch on `capabilities`. The one documented value
+     * is `coronium_node` (Coronium Node rows, also a top-level `provider`).
+     * A row with proxyEndpoints rotates asynchronously (202, see rotate()).
      */
     proxyEndpoints?: {
         provider: string;
@@ -102,6 +111,8 @@ export interface Proxy {
         socks5?: Endpoint;
         capabilities?: ProxyCapabilities;
     };
+    /** `coronium_node` on Coronium Node rows; absent on other rows. */
+    provider?: string;
     /** Last observed serving state, where the provider reports one. Informational. */
     providerState?: string;
     providerObservedAt?: string | number | null;
@@ -123,7 +134,52 @@ export interface ProxyCapabilities {
     replace?: boolean;
     openvpn?: boolean;
     p0f?: boolean;
+    cancel?: boolean;
+    manualRenewal?: boolean;
+    /** Coronium Node rows: protocols that passed qualification of this device. */
+    http?: boolean;
+    socks5?: boolean;
+    udp?: boolean;
     [flag: string]: boolean | undefined;
+}
+
+/** Answer of POST /modems/{id}/replace (200). */
+export interface ReplaceResult {
+    result: 'ok';
+    oldModemId: string;
+    /** Equals oldModemId when the line was moved instead of swapped. */
+    newModemId: string;
+    newModem: {
+        _id: string; name: string; country_code: string | null; carrier_id: string | null;
+        host: string | null; http_port: string; socks_port: string;
+        proxy_login: string; proxy_password: string; tariff_expired_at: number; isOnline: boolean;
+        /** @deprecated carries `_id`; removed 2026-11-19. */
+        IMEI?: string;
+        /** @deprecated carries `_id`; removed 2026-11-19. */
+        portId?: string;
+    };
+    /** Only for a p0f line. `kept: false` only after allow_without_p0f. */
+    p0f?: { required: boolean; kept: boolean; os: string; os_applied: boolean; pending?: boolean; note?: string };
+}
+
+export interface RotateResult {
+    result: string;
+    /** Classic rows: true only when the IP changed. 202 rows: always false (pending). */
+    rotated: boolean;
+    ip: string | null;
+    message: string;
+    /** Present (true) on 202 answers from rows with proxyEndpoints: poll rotationStatus(). */
+    pending?: boolean;
+    status_url?: string;
+    retry_after_seconds?: number;
+}
+
+export interface RotationStatus {
+    state: 'idle' | 'rotating' | 'done' | 'failed';
+    ext_ip?: string | null;
+    rotated_at?: number | null;
+    hint?: string | null;
+    [field: string]: unknown;
 }
 
 export interface Endpoint { host: string; port: number | string; username: string; password: string }
@@ -223,14 +279,39 @@ export const coronium = {
          *
          * `rotated: false` is a FAILED rotation returned with a 200. Treating
          * a 2xx as success is the single most common integration bug here.
+         *
+         * A row with `proxyEndpoints` answers 202 at once with
+         * `{ rotated: false, pending: true }`: poll rotationStatus() every
+         * 5-10 s until `done` or `failed`. Never resubmit while pending.
          */
         rotate: (id: string) =>
-            call<{ result: string; rotated: boolean; ip: string | null; message: string }>(
-                `/modems/${id}/restart`,
-                { method: 'POST' }
+            call<RotateResult>(`/modems/${id}/restart`, { method: 'POST' }),
+        rotationStatus: (id: string) =>
+            call<RotationStatus>(`/modems/${id}/rotation-status`),
+        /**
+         * Replace a broken proxy. Remaining time and metadata move to the new one.
+         * A p0f line is replaced only by a p0f line; with none available this
+         * throws 409 `p0f_replacement_unavailable` and nothing changes. Pass
+         * `allow_without_p0f: true` only after your buyer agreed to lose p0f.
+         * Key on `newModem._id` (IMEI/portId are deprecated aliases of it).
+         */
+        replace: (id: string, opts: { allow_without_p0f?: boolean } = {}) =>
+            call<ReplaceResult>(`/modems/${id}/replace`, {
+                method: 'POST',
+                body: JSON.stringify(opts.allow_without_p0f ? { allow_without_p0f: true } : {}),
+            }),
+        /** OS values this line accepts. */
+        p0fOptions: (id: string) =>
+            call<{ result: string; data: { modemId: string; supported: boolean; vocabulary: 'os_profile' | 'tcp_stack' | null; options: string[]; current: string; next_change_in_seconds: number } }>(
+                `/modems/${id}/p0f-options`
             ),
-        replace: (id: string) =>
-            call<any>(`/modems/${id}/replace`, { method: 'POST' }),
+        /**
+         * Set the OS fingerprint ('' turns it off). Refusals change nothing:
+         * 400 p0f_unsupported_on_server, 400 p0f_os_unsupported_on_this_server
+         * (body.allowed), 429 one change per 5 minutes, 502 p0f_not_applied (retry in a minute).
+         */
+        setOs: (id: string, os: string) =>
+            call<any>(`/modems/${id}/set-os`, { method: 'PUT', body: JSON.stringify({ os }) }),
         /**
          * Download the line's .ovpn profile (text). Check `features.openvpn.available`
          * on the line first: when it is false the call refuses.

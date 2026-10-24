@@ -44,7 +44,7 @@ You can integrate directly with the REST API. No reseller dashboard or SDK is
 required. Use Bearer auth server-side, fetch `GET /account` for the distinct
 account-credit/BTC/USDT balances, `GET /tariffs/available` for stock, and
 `POST /payment/renewal-quote` before an explicit renewal. The raw interactive
-API reference is <https://dashboard.coronium.io/api-docs/>.
+API reference is <https://api.coronium.io/api-docs/>.
 
 ### C) Just the webhook (you already have a backend / CRM)
 
@@ -52,7 +52,7 @@ API reference is <https://dashboard.coronium.io/api-docs/>.
 git clone https://github.com/bolivian-peru/coronium-reseller-kit
 cd coronium-reseller-kit/examples/webhook-receiver
 npm install
-CORONIUM_WEBHOOK_SECRET=<signing-secret-from-support> node server.js
+CORONIUM_WEBHOOK_SECRET=<your-signing-secret> node server.js
 ```
 
 ### D) AI-scaffolded custom dashboard
@@ -79,6 +79,16 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
 
 The response contains the HTTP status your endpoint returned.
 
+Create your own signing secret once (it is shown only in this answer; store it server-side):
+
+```bash
+curl -X POST https://api.coronium.io/api/v3/account/webhook/secret/rotate \
+  -H "Authorization: Bearer $CORONIUM_API_KEY"
+```
+
+Until you create one, deliveries are signed with the platform default secret
+(`X-Coronium-Signature-Source: global`).
+
 Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, re-stamp metadata and notify the customer of changed credentials. Handle `modem.dead` and `proxy.purchase_failed` as service incidents.
 
 ## 5. Buy your first proxy
@@ -102,7 +112,7 @@ It is `modemCount`, and `metadata` is a JSON string. Country and carrier come fr
 
 You get back `{result, charged_usd, currency, data:[{_id, http_port, socks_port, proxy_login, proxy_password, ext_ip, …}], billing}`. `data[0]` is your customer's proxy; `billing` itemizes what you were charged.
 
-If stock ran out between listing and buying, the current balance lanes return `409 OUT_OF_STOCK`; ask the buyer to choose another available product.
+If stock ran out between listing and buying, the balance lanes return `409` with `code: "no_stock"` (`reason_code: "OUT_OF_STOCK"`) and nothing is charged; ask the buyer to choose another available product. With `require: ["p0f"]` the refusal is `409 p0f_unavailable`.
 
 ## 6. Set up the customer-facing side
 
@@ -119,7 +129,7 @@ For end-customer auth, billing, and dashboard, you build that yourself on top of
    curl -X POST https://api.coronium.io/api/v3/modems/$MODEM_ID/restart \
      -H "Authorization: Bearer $CORONIUM_API_KEY"
    ```
-   The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change - the call still returns 200, so always read that field.
+   The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change - the call still returns 200, so always read that field. A proxy with `proxyEndpoints` answers 202 `pending: true` instead: poll `GET /modems/$MODEM_ID/rotation-status` until `done` or `failed`.
 4. Where the provider supports auto-swap, a signed `modem.replaced` event carries the new connection details. Reconcile the mapping, re-stamp metadata and notify the customer. For providers without replacement capability, rely on health checks and your support workflow.
 
 That's the whole flywheel.

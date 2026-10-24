@@ -105,7 +105,8 @@ async function processEvent(body) {
             //        metadata: "{\"customer_id\":\"acme-007\"}" }
             //
             // 2) Update your CRM / Stripe customer metadata / DB row:
-            //      - modem_id          : data.new_modem_id (was data.old_modem_id)
+            //      - modem_id          : data.new_modem_id (was data.old_modem_id;
+            //                            can be equal when the line was moved)
             //      - host              : data.new_modem.host
             //      - http_port         : data.new_modem.http_port
             //      - socks_port        : data.new_modem.socks_port
@@ -117,9 +118,13 @@ async function processEvent(body) {
             //    The new modem is in the same country, with the same remaining
             //    paid time - they don't lose anything, but the URL changes.
             //
-            // 4) IMPORTANT: the replacement does NOT inherit the old modem's
-            //    metadata. Re-stamp it or the proxy shows up unassigned:
+            // 4) The replacement keeps your metadata. Re-stamping is a harmless
+            //    safety net for lines replaced before October 2026:
             //      PUT /api/v3/modems/{data.new_modem_id}/set-metadata
+            //
+            // Key on data.new_modem._id. new_modem.IMEI / portId are deprecated
+            // aliases of it and disappear on 2026-11-19. A replaced p0f line
+            // adds data.p0f = { required, kept, os, os_applied, pending?, note? }.
             break;
         }
 
@@ -127,14 +132,18 @@ async function processEvent(body) {
             console.log(`[event] modem.dead: ${data.old_modem_id} (${data.reason})`);
             //
             // No replacement was available. Possible reasons:
-            //   - no_stock          : geo is exhausted right now
-            //   - pipeline_failed   : provisioning bug - file a ticket with data.old_modem_id
-            //   - shared_modem      : was on a shared tariff (rare for resellers)
-            //   - tariff_orphan     : corrupt tariff record - ticket
+            //   - no_stock             : geo is exhausted right now
+            //   - no_p0f_stock         : p0f line, no p0f replacement. Ask the buyer
+            //                            before replacing with { allow_without_p0f: true }
+            //   - pipeline_failed      : provisioning failed - file a ticket with data.old_modem_id
+            //   - provider_unsupported : this line type is not replaced automatically - ticket
+            //   - shared_modem, tariff_orphan, no_owner, modem_not_found,
+            //     config_error, move_<code>, unknown : not replaced - ticket if it persists
+            //   Treat any other value as "not replaced".
             //
             // Recommended:
             //   1) Flag the modem in your local state.
-            //   2) Notify the end-customer; offer refund or manual replacement
+            //   2) Notify the end-customer and offer a manual replacement
             //      (call POST /api/v3/modems/{old_modem_id}/replace yourself -
             //      it may succeed later when stock returns).
             //   3) Optionally retry /replace on a schedule.
@@ -145,6 +154,12 @@ async function processEvent(body) {
         case 'proxy.renewed':
             // data: { order_id, amount_usd, provider, days, count, proxies[] }
             console.log(`[event] ${body.event}: ${data.count} proxies, $${data.amount_usd}`);
+            break;
+
+        case 'proxy.purchase_failed':
+            // data: { order_id, amount_usd, requested, reason_code, retryable, refund }
+            // Read data.refund before any retry: a refunded order went back to balance.
+            console.log(`[event] proxy.purchase_failed: ${data.order_id} (${data.reason_code})`);
             break;
 
         case 'proxy.expired':

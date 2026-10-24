@@ -2,7 +2,7 @@
 
 Two per-line features that not every unit has. The API tells you which units have
 them before you buy, lets you require one at checkout, and tells you exactly why a
-download is refused. Live since 21 Oct 2026. Full reference:
+download is refused. Synced with OpenAPI 3.3.4 (24 Oct 2026). Full reference:
 <https://api.coronium.io/api-docs/>.
 
 ## 1. Find stock with p0f
@@ -93,11 +93,96 @@ HTTP 400
 - `unknown_requirement`: `require` must be a list holding only `"p0f"`. Any other
   value, or a non-list, is refused so a typo never buys a unit without the feature.
 
-After purchase, set the OS with `PUT /modems/{id}/set-os` and read the options with
-`GET /modems/{id}/p0f-options`. Each line's `features.p0f.supported_values` lists
-what it accepts.
+## 3. Set the OS on a line
 
-## 3. Download OpenVPN
+Each line in `GET /account/proxies` carries:
+
+```json
+"features": {
+  "p0f": {
+    "server_supported": true,
+    "current_os": "",
+    "supported_values": ["ios:2", "windows:1", "..."],
+    "vocabulary": "os_profile",
+    "unavailable_reason": null
+  },
+  "openvpn": { "available": true, "download_url": "https://..." },
+  "native_ipv6": false
+}
+```
+
+- `supported_values` is what `set-os` accepts on this line. Values differ between line
+  types, so never hard-code a list.
+- `vocabulary` names the value list: `os_profile` (such as `ios:2`) or `tcp_stack`
+  (such as `Win10`), `null` when the line has no OS control. It replaced
+  `features.p0f.provider`, which is gone.
+- `unavailable_reason` says why a line has no OS control: `mobile_network` (the line's
+  mobile network rewrites the signature, so no OS change can show) or `line` (any other
+  reason). `null` when OS control is available.
+- `current_os` (and the older top-level `p0f_os`) is the active value; empty means
+  pass-through.
+
+Read the options, then set one (`""` turns it off):
+
+```bash
+curl -H "Authorization: Bearer $CORONIUM_API_KEY" \
+  https://api.coronium.io/api/v3/modems/<modem_id>/p0f-options
+# -> {"result":"ok","data":{"modemId":"...","supported":true,"vocabulary":"os_profile",
+#      "options":[...],"current":"","next_change_in_seconds":0}}
+
+curl -X PUT https://api.coronium.io/api/v3/modems/<modem_id>/set-os \
+  -H "Authorization: Bearer $CORONIUM_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"os":"<a value from options>"}'
+```
+
+`set-os` refusals. Nothing is changed in any of them:
+
+| Status | `code` | Meaning |
+|---|---|---|
+| 400 | `p0f_unsupported_on_server` | This line has no OS control. Hide the control |
+| 400 | `p0f_os_unsupported_on_this_server` | The value is not in this line's list; the body carries `allowed` |
+| 429 | generic | One change per 5 minutes per proxy. Wait `Retry-After` |
+| 502 | `p0f_not_applied` | The change could not be applied or the line's state could not be read. Retry in a minute |
+| 404 | `p0f_unavailable` | OS changes are not available on this line right now. Contact support |
+
+## 4. Replacing a p0f line
+
+A line bought with `require: ["p0f"]`, or one with an OS set, is replaced only by a p0f
+line, and its OS is applied to the new one. This holds for your own
+`POST /modems/{id}/replace`, a replacement by support and the automatic swap of a dead line.
+
+```json
+HTTP 200
+{ "result": "ok", "oldModemId": "...", "newModemId": "...",
+  "newModem": { "_id": "...", "host": "...", "http_port": "...", "socks_port": "...",
+                "proxy_login": "...", "proxy_password": "...", "tariff_expired_at": 1779404400000 },
+  "p0f": { "required": true, "kept": true, "os": "ios:2", "os_applied": true } }
+```
+
+While a just-created port is still registering, `p0f` adds `pending: true` and a `note`;
+the OS is applied automatically within about 10 minutes.
+
+With no p0f line available:
+
+```json
+HTTP 409
+{ "error": "No replacement with OS fingerprint (p0f) control is available right now. Your current proxy is unchanged. ...",
+  "code": "p0f_replacement_unavailable", "suggested_action": "retry_later_or_allow_without_p0f",
+  "changed": false, "retryable": false, "request_id": "req_..." }
+```
+
+Nothing changed and no replacement was used. Retry later, or, **only with your buyer's
+consent**, resend with a body of `{"allow_without_p0f": true}` to accept a line without
+p0f (the answer then says `p0f.kept: false`). An automatic swap in the same situation
+sends `modem.dead` with `reason: "no_p0f_stock"` instead of replacing.
+
+```js
+// examples/nextjs-dashboard/lib/coronium.ts
+await coronium.proxies.replace(modemId);                              // keeps p0f or throws 409
+await coronium.proxies.replace(modemId, { allow_without_p0f: true }); // buyer agreed
+```
+
+## 5. Download OpenVPN
 
 Check the line first: `features.openvpn.available` on `GET /account/proxies`. When it
 is `false`, the download refuses.
@@ -127,7 +212,12 @@ Answers:
 const profile = await coronium.proxies.openvpn(modemId);
 ```
 
-## 4. Error envelope
+Coronium Node rows (top-level `provider: "coronium_node"`) differ: the profile
+**downloads once**. Store the file. A second download, a lost download or a password change
+answers `409 vpn_revoke_required`; call `POST /modems/{id}/openvpn/revoke` (no body), then
+download again. `409 vpn_not_ready` means OpenVPN is not available on that rental yet.
+
+## 6. Error envelope
 
 Every `/api/v3` error carries `error`, `code`, `suggested_action`, `retryable` and
 `request_id` (also the `X-Request-Id` header). `reason_code` appears only when the

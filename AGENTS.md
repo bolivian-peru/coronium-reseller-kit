@@ -15,7 +15,7 @@ You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G
 3. `docs/webhook-integration.md` - the auto-swap event flow
 4. `docs/metadata-strategy.md` - metadata plus the durable local mapping needed for swaps
 5. `docs/p0f-and-openvpn.md` - p0f stock per region, `require: ["p0f"]` on buy, OpenVPN download answers
-6. Coronium reseller API - authoritative interactive OpenAPI / Swagger UI: <https://dashboard.coronium.io/api-docs/> (public, no login required)
+6. Coronium reseller API - authoritative interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required). Kit synced with OpenAPI 3.3.4; see `CHANGELOG.md`
 
 ## The minimum-viable reseller dashboard has six features
 
@@ -42,22 +42,24 @@ tie out to the cent. See docs/billing-and-reconciliation.md.
 arrive and your fulfilment flow must poll instead of wait.
 
 1. **Never put `CORONIUM_API_KEY` in client-side code.** All API calls must go through server routes (Next.js `app/api/...`, or Express/Fastify proxy). The dashboard is hosted by the reseller; their token must not leak to browsers.
-2. **Use `metadata.customer_id` for customer mapping and a small durable local recovery index.** Metadata is returned in proxy lists but is not inherited by replacements. Keep old modem ID → customer ID until a swap is reconciled.
+2. **Use `metadata.customer_id` for customer mapping and a small durable local recovery index.** Metadata is returned in proxy lists and is copied onto every replacement. Keep old modem ID → customer ID until a swap is reconciled anyway: the old modem can be gone before your worker runs.
 3. **Register the webhook URL via `PUT /api/v3/account/webhook` exactly once on first deploy.** Don't re-PUT every request. Store the registration in the reseller's own state (config file, env, KV) so you know when it's already configured.
 4. **Authenticate via Bearer header** for any new code you write. `?auth_token=` query-param also works but logs to access.log everywhere; Bearer is the right pattern.
 5. **Stock-out is normal.** `/api/v3` answers `409` with `code: "no_stock"` (and `reason_code: "OUT_OF_STOCK"`). A buy with `require: ["p0f"]` and no p0f unit answers `409 p0f_unavailable`. Surface both clearly; do not retry-loop. Read `p0f_count` (`/free-modems`) or `features.p0f.count` (`/tariffs/available`) to offer only regions and plans that can fill it.
 6. **Idempotency** - `/payment/*` POSTs accept an `Idempotency-Key` header (`[A-Za-z0-9_-]{8,128}`, 24h window; a replay answers with `X-Idempotency-Replay: true`). Generate ONE UUID per buy *intent* - at the moment the human confirms - and resend that same key on every retry. A key derived from a timestamp changes between attempts and buys twice.
-7. **Handle auto-swap only where supported.** Fields are under `data`. Verify HMAC, persist the event, ack within 5 seconds, then notify your customer. The replacement already carries your `metadata`; re-stamping is harmless. Some line types do not advertise replacement; check `proxyEndpoints.capabilities.replace`.
-8. **Rotation is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** - branch on `rotated`, never on the status code. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
+7. **Handle auto-swap only where supported.** Fields are under `data`. Verify HMAC, persist the event, ack within 5 seconds, then notify your customer. The replacement already carries your `metadata`; re-stamping is harmless. Some line types do not advertise replacement; check `proxyEndpoints.capabilities.replace`. Key on `new_modem._id`; `new_modem.IMEI` / `portId` are deprecated aliases of it until 2026-11-19.
+8. **Rotation on a classic proxy is synchronous and reports failure with a 200.** `POST /modems/{id}/restart` holds the request open until the carrier answers, then returns `{result:'ok', rotated: <bool>, ip, message}`. **`rotated:false` at HTTP 200 means the IP did NOT change** - branch on `rotated`, never on the status code. A row with `proxyEndpoints` answers **202** with `pending: true`: poll `GET /modems/{id}/rotation-status` until `done` or `failed`; do not resubmit. There is no `?sync=true` query flag and no `503 rotation_timeout`; both were removed. The token-auth variant `GET /modems/rotate-modem-by-token/{token}` behaves differently: `200` only on a verified new IP (carries `ext_ip`/`new_ip`), `502` otherwise (branch on that HTTP status, not on a body error code), `429` inside the ~60 s per-modem cooldown.
 9. **`rotation_interval` is in SECONDS.** `PUT /modems/{id}/set-rotation-interval` accepts `0` (disabled) or **≥ 60**. Anything from 1 to 59 is a 400 - a caller who thinks in minutes and sends `5` gets rejected, and one who sends `30` meaning "30 minutes" gets rejected too.
-10. **`metadata` is a JSON string, and it is NOT inherited by auto-swap replacements.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamp the new modem with `PUT /modems/{new_modem_id}/set-metadata` or that proxy is permanently unattributed.
+10. **`metadata` is a JSON string, and every replacement keeps it.** Send it pre-stringified on buy. After a `modem.replaced` event, re-stamping the new modem with `PUT /modems/{new_modem_id}/set-metadata` is a harmless safety net (lines replaced before October 2026 may have lost it).
 11. **No stock header is required.** Without a header you get units with one login on both ports. `X-Coronium-Proxy-Credentials: separate-protocol-v1` (optional) also offers units with separate HTTP/SOCKS5 logins; then use `proxyEndpoints.http` and `.socks5` independently. Use the same contract and rental period throughout discovery and checkout. See `docs/stock-and-credentials.md`.
-12. **Never branch on `proxyEndpoints.provider`.** It is an opaque label and new values appear without notice. Use `proxyEndpoints.capabilities` to decide which actions to show, and do not display the provider label to end-customers.
+12. **Never branch on `proxyEndpoints.provider`.** It is an opaque label and new values appear without notice. The one documented value is `coronium_node` (Coronium Node rows, also a top-level `provider`). Use `proxyEndpoints.capabilities` to decide which actions to show, and do not display the provider label to end-customers.
 13. **Coupons work on both balance lanes.** Pass `coupon: {coupon_name}` on quote, purchase and renewal; confirm from `billing.discount` that it applied. Never compute a discounted price yourself.
 14. **Secrets stay out of logs and the client.** That includes the API key, the webhook signing secret, proxy passwords and raw webhook payloads.
 15. **Keep the dashboard private.** The operator sample requires Basic auth and persistent SQLite. It is not a public end-customer login or a serverless one-command deploy.
 16. **OpenVPN pending is not broken.** `GET /modems/{id}/openvpn` on a line set up in the last 2 hours can answer `503 openvpn_profile_pending` with `Retry-After` (120 s). Retry the same line after that wait; never replace it (a new line starts a new wait). `409 openvpn_not_supported` and `400 openvpn_disabled` are final; check `features.openvpn.available` before offering a download.
 17. **Only send `require` values that exist.** Today that is `["p0f"]`. Anything else is `400 unknown_requirement` with `supported: ["p0f"]`.
+18. **Replacing a p0f line keeps p0f.** No p0f line available: `409 p0f_replacement_unavailable`, nothing changed. Ask the buyer before resending with `{"allow_without_p0f": true}`. An automatic swap in that case sends `modem.dead` with `reason: "no_p0f_stock"`.
+19. **Take OS values from the line.** `features.p0f.supported_values` (or `GET /modems/{id}/p0f-options`) and `vocabulary` (`os_profile` or `tcp_stack`) say what a line accepts; `unavailable_reason` (`mobile_network` or `line`) says why it has none. There is no `features.p0f.provider` any more.
 
 ## Architecture you should produce
 
@@ -126,8 +128,8 @@ When a modem the reseller owns dies (5+ consecutive failed health checks AND rem
   "new_modem": {
     "_id": "6a1cf4d2942c49e02b1234ab",
     "name": "cor_US_NJ_x83",
-    "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
-    "portId": "cor_US_…",
+    "IMEI": "6a1cf4d2942c49e02b1234ab",
+    "portId": "6a1cf4d2942c49e02b1234ab",
     "country_code": "US",
     "carrier_id": "...",
     "host": "172.56.171.4",
@@ -147,12 +149,14 @@ When stock is unavailable in the geo, `modem.dead` with:
 "data": {
   "old_modem_id": "...",
   "new_modem_id": null,
-  "reason": "no_stock" | "pipeline_failed" | "shared_modem" | "tariff_orphan" | "modem_not_found" | "unknown",
+  "reason": "no_stock" | "no_p0f_stock" | "pipeline_failed" | "provider_unsupported" | "shared_modem" | "tariff_orphan" | "no_owner" | "modem_not_found" | "config_error" | "move_<code>" | "unknown",
   "remediation": "POST /api/v3/modems/{old_modem_id}/replace to retry, or contact support"
 }
 ```
 
-You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore `proxy.expiring_soon` - the `PUT /account/webhook` response lists it, but nothing emits it.
+`IMEI` and `portId` are deprecated aliases that carry the `_id` (never a hardware id) and are removed on 2026-11-19. Treat unknown `reason` values as "not replaced". A replaced p0f line adds `data.p0f` (`{required, kept, os, os_applied, pending?, note?}`).
+
+You also receive `proxy.purchased`, `proxy.purchase_failed`, `proxy.renewed` and `proxy.expired`, plus `proxy.added`, `proxy.removed` and `proxy.updated` if you opt in with `PUT /account/webhook {"history_events": true}`. Ignore `proxy.expiring_soon` - the `PUT /account/webhook` response lists it, but nothing emits it.
 
 **Handler must:**
 
@@ -164,7 +168,7 @@ You also receive `proxy.purchased`, `proxy.renewed` and `proxy.expired`. Ignore 
 ## Hard-coded values worth knowing
 
 - API base: `https://api.coronium.io/api/v3`
-- API docs: `https://dashboard.coronium.io/api-docs/` (public, no login required)
+- API docs: `https://api.coronium.io/api-docs/` (public, no login required; also at `https://dashboard.coronium.io/api-docs/`)
 - JWT lifetime: 365 days, refreshable via `POST /api/v3/wallet-key/rotate-challenge` + `/wallet-key/rotate`
 - Webhook delivery: 5s timeout, up to 8 attempts with escalating backoff, then dead-letter; HMAC-signed via `X-Coronium-Signature` + `X-Coronium-Event-Id`; redirects not followed
 - Detection cadence: every 30 min, threshold 5 consecutive failed health checks
@@ -188,7 +192,7 @@ Common requests and the right answer:
 | Symptom | What it means | What to do |
 |---|---|---|
 | `401 Unauthorized` on any call | API key invalid or expired | Show "reauthorize" UI; user pastes a fresh key |
-| `409 OUT_OF_STOCK` on buy | No eligible proxy for that tariff now | Ask buyer to choose another product; don't retry-loop |
+| `409 no_stock` on buy | No eligible proxy for that tariff now | Ask buyer to choose another product; don't retry-loop |
 | `409 p0f_unavailable` on buy with `require: ["p0f"]` | No p0f unit in that plan or region now | Pick one with `p0f_count` / `features.p0f.count` above 0; nothing was charged |
 | `400 unknown_requirement` | `require` holds something other than `"p0f"` | Send `["p0f"]` or leave it out |
 | `503 openvpn_profile_pending` | New line's OpenVPN profile still being issued | Wait `Retry-After`, retry the same line; never replace |
@@ -196,11 +200,16 @@ Common requests and the right answer:
 | `400 BAD_MODEM_COUNT` | You sent `modem_count`/`count`, or a non-positive number | The field is `modemCount` |
 | `400` on set-rotation-interval | Value between 1 and 59 | The unit is SECONDS; minimum 60, or 0 to disable |
 | `200` with `rotated: false` | Rotation ran but the IP did not change | Retry after a few seconds; if it persists, `/replace` the modem |
+| `202` with `pending: true` on restart | Row with `proxyEndpoints`: rotation recorded, not done | Poll `rotation-status` until `done` or `failed`; never resubmit or replace for this |
+| `409 p0f_replacement_unavailable` on replace | p0f line, no p0f replacement now | Nothing changed. Retry later, or with the buyer's consent resend `{"allow_without_p0f": true}` |
+| `400 p0f_unsupported_on_server` on set-os | This line has no OS control | Hide the OS control; read `features.p0f.unavailable_reason` |
+| `502 p0f_not_applied` on set-os | Nothing changed | Retry in a minute |
 | `429` on rotate-by-token | Inside the ~60 s per-modem cooldown | Back off; don't hammer |
 | Webhook fields all `undefined` | You're reading the top level | They're under `data` - `body.data.old_modem_id` |
 | Webhook never fires after a modem dies | No webhook URL set, or your endpoint is failing | Run `POST /account/webhook/test` - it returns your endpoint's actual response |
 | `modem.dead` with `reason: "no_stock"` | We tried to swap, couldn't find replacement geo | Notify your customer, retry-`replace` manually later |
-| Swapped proxy shows as unassigned | Metadata isn't carried onto replacements | Re-stamp via `PUT /modems/{id}/set-metadata` in your webhook handler |
+| `modem.dead` with `reason: "no_p0f_stock"` | p0f line, no p0f replacement | Ask the buyer; `replace` later, or with `allow_without_p0f: true` |
+| Swapped proxy shows as unassigned | A line replaced before October 2026 lost its metadata | Re-stamp via `PUT /modems/{id}/set-metadata` in your webhook handler |
 
 ## When you're done
 

@@ -19,7 +19,7 @@ Put an HTTPS reverse proxy in front of the dashboard. The Basic-auth operator lo
 
 ## Connect the webhook
 
-Ask Coronium support for your account's webhook signing secret and put it in `.env`. Register the final public HTTPS URL, without a query-string secret:
+Create your account's webhook signing secret with `POST /api/v3/account/webhook/secret/rotate` (Bearer API key; the secret is shown once) and put it in `.env`. Register the final public HTTPS URL, without a query-string secret:
 
 ```bash
 curl -X PUT https://api.coronium.io/api/v3/account/webhook \

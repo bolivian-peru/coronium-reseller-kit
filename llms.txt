@@ -13,7 +13,8 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 3. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/billing-and-reconciliation.md> - charged amount, coupon before/after, carrier, webhook receipt
 4. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/p0f-and-openvpn.md> - p0f stock per region, `require: ["p0f"]`, OpenVPN download answers
 5. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> - working foundation
-6. <https://dashboard.coronium.io/api-docs/> - authoritative interactive API reference (OpenAPI / Swagger UI, public)
+6. <https://api.coronium.io/api-docs/> - authoritative interactive API reference (OpenAPI 3.3.4 / Swagger UI, public)
+7. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/CHANGELOG.md> - dated API and kit changes, breaking vs additive
 
 ## API endpoints you'll use
 
@@ -27,27 +28,28 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 - `POST https://api.coronium.io/api/v3/payment/renewal-quote` - read-only exact renewal quote
 - `POST https://api.coronium.io/api/v3/payment/renew-with-account-credit` - explicit renewal with USD credit
 - `POST https://api.coronium.io/api/v3/payment/renew-modems-with-crypto-balance` - explicit renewal with BTC balance
-- `POST https://api.coronium.io/api/v3/modems/{id}/restart` - rotate IP. SYNCHRONOUS. Always `200` with `{result, rotated, ip, message}` - `rotated:false` is a failure returned as 200. There is no `?sync=true`, no `new_ip`, no 503.
+- `POST https://api.coronium.io/api/v3/modems/{id}/restart` - rotate IP. Classic proxy: SYNCHRONOUS, `200` with `{result, rotated, ip, message}` - `rotated:false` is a failure returned as 200. There is no `?sync=true`, no `new_ip`, no 503. A row with `proxyEndpoints` answers `202` with `pending: true`: poll `GET /modems/{id}/rotation-status` until `done` or `failed`.
 - `GET https://api.coronium.io/api/v3/modems/rotate-modem-by-token/{token}` - token-auth rotation. `200` only on a verified new IP (`ext_ip`/`new_ip`), `502` otherwise (branch on the HTTP status, not on a body error code), `429` during the ~60 s per-modem cooldown.
 - `PUT https://api.coronium.io/api/v3/modems/{id}/set-rotation-interval` - `{rotation_interval: <SECONDS>}`, minimum 60, 0 disables. Minutes are rejected with 400.
-- `POST https://api.coronium.io/api/v3/modems/{id}/replace` - swap broken proxy
+- `POST https://api.coronium.io/api/v3/modems/{id}/replace` - swap broken proxy; remaining time and `metadata` are kept. A p0f line gets a p0f line or `409 p0f_replacement_unavailable` (nothing changed); body `{"allow_without_p0f": true}` accepts one without p0f. Key on `newModem._id`: `IMEI`/`portId` are deprecated aliases of it until 2026-11-19.
+- `GET https://api.coronium.io/api/v3/modems/{id}/p0f-options` / `PUT .../set-os` `{"os": "<value>"}` - OS fingerprint. Lines carry `features.p0f.{server_supported, supported_values, vocabulary, unavailable_reason}`; there is no `features.p0f.provider`. Refusals: `400 p0f_unsupported_on_server`, `400 p0f_os_unsupported_on_this_server`, `429` (one change per 5 min), `502 p0f_not_applied`.
 - `GET https://api.coronium.io/api/v3/modems/{id}/openvpn` - `.ovpn` profile. `503 openvpn_profile_pending` + `Retry-After` on a line set up in the last 2 h: retry the same line, never replace. `409 openvpn_not_supported` / `400 openvpn_disabled` are final; check the line's `features.openvpn.available`.
 - `PUT https://api.coronium.io/api/v3/modems/{id}/set-metadata` - re-stamp customer mapping
 - `PUT https://api.coronium.io/api/v3/account/webhook` - register webhook URL
 - `POST https://api.coronium.io/api/v3/account/webhook/test` - fire a real signed test event, returns the delivery result
 
-Auth: `Authorization: Bearer <jwt>` header. JWT lifetime 365 days.
+Auth: `Authorization: Bearer <jwt>` header. Dashboard API key lifetime 365 days. `/get-token` and `/signup` never reveal whether an account exists (`401 Invalid email or password.` for both unknown address and wrong password).
 
 Errors on `/api/v3` return `{error, code, reason_code?, suggested_action, retryable, request_id}` plus an `X-Request-Id` header. `error` is the human string, `code` the machine id. There is no `message` field.
 
 ## Critical patterns
 
-- **Customer mapping**: use the freeform `metadata` JSON field on each modem to track which of the reseller's end-customers owns which proxy. Send it as a JSON **string**. Keep a minimal local `customer_id → modem_id` record too, because metadata is NOT copied onto auto-swap replacements.
+- **Customer mapping**: use the freeform `metadata` JSON field on each modem to track which of the reseller's end-customers owns which proxy. Send it as a JSON **string**. Every replacement keeps it. Keep a minimal local `customer_id → modem_id` record too, as recovery when the old modem is gone before your worker runs.
 - **Server-side JWT**: never put `CORONIUM_API_KEY` in client-side code. All API calls go through the reseller's own server.
 - **Webhook replacements**: `modem.replaced` is sent for every replacement (automatic when a modem dies, your own `POST /modems/:id/replace`, or support) and the new proxy keeps your `metadata`. Fields are nested under `data` (`data.old_modem_id`, `data.new_modem`), the envelope carries `event_id`/`occurred_at`/`account`. Deliveries are HMAC-signed (`X-Coronium-Signature`) and retried up to 8 times.
 - **Idempotency**: `Idempotency-Key` header on `/payment/*` POSTs, `[A-Za-z0-9_-]{8,128}`, 24h replay window. One key per buy intent, reused across retries.
 - **Stock header (optional)**: Units with one login on both ports are offered without any header. `X-Coronium-Proxy-Credentials: separate-protocol-v1` on stock and purchase calls also offers units with separate HTTP/SOCKS5 logins; then read `proxyEndpoints.http` and `.socks5` and never reuse HTTP credentials for SOCKS5.
-- **Capabilities, not provider**: `proxyEndpoints.provider` is an opaque label - never branch on it or show it. Use `proxyEndpoints.capabilities` to decide which actions exist for a proxy.
+- **Capabilities, not provider**: `proxyEndpoints.provider` is an opaque label - never branch on it or show it. The one documented value is `coronium_node` (Coronium Node rows). Use `proxyEndpoints.capabilities` to decide which actions exist for a proxy.
 - **Coupons**: `coupon: {coupon_name}` works on account-credit and BTC lanes, on quote, purchase and renewal. Read the applied discount from `billing.discount`; list price is `billing.subtotal_usd`.
 
 ## Don't

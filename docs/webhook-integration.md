@@ -10,7 +10,7 @@ With the Coronium webhook flow:
 
 1. Coronium detects an eligible failed modem with remaining paid time
 2. If the provider and stock support replacement, Coronium provisions a replacement
-3. The original `tariff_expired_at` is transferred - your customer doesn't lose paid time
+3. The original `tariff_expired_at` and your `metadata` are transferred - your customer doesn't lose paid time
 4. The old modem is quarantined to a system bucket
 5. Coronium POSTs an event to your webhook URL with old + new modem IDs and full credentials
 6. Your handler updates the customer's record with the new credentials
@@ -29,7 +29,7 @@ curl -X PUT https://api.coronium.io/api/v3/account/webhook \
   -d '{"webhook_url":"https://your-host/api/coronium/webhook"}'
 ```
 
-`webhook_url` must be **HTTPS** (HTTP returns 400). Max length 500 chars. The target must be a public host: internal, private and non-resolving addresses are rejected with `code: "invalid_webhook_target"`. Use the HMAC signature for authentication, not a secret in the URL.
+`webhook_url` must be **HTTPS** (HTTP returns 400). A registered webhook also opts the account into automatic same-location replacement of dead proxies; removing it turns that off and dead-proxy notices go back to email. Max length 500 chars. The target must be a public host: internal, private and non-resolving addresses are rejected with `code: "invalid_webhook_target"`. Use the HMAC signature for authentication, not a secret in the URL.
 
 Disable later with `{"webhook_url": null}`.
 
@@ -69,8 +69,8 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
     "new_modem": {
       "_id": "6a1cf4d2942c49e02b1234ab",
       "name": "cor_US_NJ_x83",
-      "IMEI": "EXAMPLE_IMEI_PLACEHOLDER",
-      "portId": "cor_US_…",
+      "IMEI": "6a1cf4d2942c49e02b1234ab",
+      "portId": "6a1cf4d2942c49e02b1234ab",
       "country_code": "US",
       "carrier_id": "6519b2095df31c2dd53fa0ad",
       "host": "172.56.171.4",
@@ -87,6 +87,11 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 
 Same payload for every replacement. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
 
+- Key on `new_modem._id`. `IMEI` and `portId` are **deprecated** aliases that carry the same `_id` (never a hardware or port id) and are removed on **2026-11-19**.
+- A replaced p0f line adds `data.p0f`: `{required, kept, os, os_applied, pending?, note?}`. See [p0f and OpenVPN](./p0f-and-openvpn.md#4-replacing-a-p0f-line).
+- On some line types the line is moved instead of swapped: `new_modem_id` equals `old_modem_id` and only the ports change. Update the credentials either way.
+- Replacements by support may add `old_modem_name` and `reason`.
+
 ### `modem.dead` - auto-swap couldn't complete
 
 ```json
@@ -101,7 +106,19 @@ Same payload for every replacement. The replacement carries the remaining paid t
 }
 ```
 
-`reason` values: `no_stock`, `pipeline_failed`, `shared_modem`, `tariff_orphan`, `modem_not_found`, `unknown`.
+`reason` values:
+
+| `reason` | Meaning |
+|---|---|
+| `no_stock` | No available proxy from the same supply in that country |
+| `no_p0f_stock` | The proxy has OS fingerprint (p0f) and no p0f proxy is available. Replace it yourself with `{"allow_without_p0f": true}` once your buyer agrees |
+| `pipeline_failed` | Provisioning failed; the old proxy is kept |
+| `provider_unsupported` | This line type cannot be replaced automatically; contact support |
+| `shared_modem`, `tariff_orphan`, `no_owner`, `modem_not_found`, `config_error` | Not replaced; contact support if it persists |
+| `move_<code>` | A move of the line did not complete |
+| `unknown` | The swap failed without a specific code |
+
+Treat any value you do not know as "not replaced".
 
 ### Lifecycle events
 
@@ -109,10 +126,16 @@ Same payload for every replacement. The replacement carries the remaining paid t
 |---|---|
 | `proxy.purchased` | `{order_id, amount_usd, provider, days, count, proxies[]}` |
 | `proxy.renewed` | same as purchased |
-| `proxy.purchase_failed` | `{order_id, amount_usd, requested, reason_code, reason, retryable, retry_after_seconds, refund}`; inspect the refund receipt before any retry |
+| `proxy.purchase_failed` | `{order_id, amount_usd, currency, provider, requested, reason_code, reason, retryable, retry_after_seconds, refund}`; inspect the refund receipt before any retry |
 | `proxy.expired` | `{proxy}` |
-| `deposit.confirmed` | `{amount_usd, provider, external_id}` - a balance top-up cleared |
-| `webhook.test` | `{message}` - only from the test endpoint |
+| `webhook.test` | same envelope plus legacy top-level `message`, `user_id`, `ts` - only from the test endpoint |
+| `proxy.added` | opt-in (`history_events`): `{history_id, proxies[], reason, duration_hours, payment_id, actor}` - support added proxies to your account |
+| `proxy.removed` | opt-in: `{history_id, proxies[], reason, actor}` - proxies left your account before their term ended |
+| `proxy.updated` | opt-in: `{history_id, proxy, change_type, changes[], fields[], actor}` - credentials, ports or settings changed. Says what changed, never the values |
+
+The three history events are off unless you send `PUT /account/webhook` with `{"history_events": true}`. Their proxy descriptor is `{proxy_id, modem_id, name, country, expires_at}`; `actor.kind` is `api` for your own calls, so you can ignore your own changes.
+
+There is no deposit event for resellers: confirm a top-up with `GET /account`.
 
 Each entry in `proxies[]` is `{proxy_id, modem_id, country, carrier, http_port, socks_port, ext_ip, expires_at}`.
 
@@ -154,13 +177,14 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
   endpoint is public; the signature is the only thing that proves the sender.
 - **Constant-time comparison** (`timingSafeEqual`), over the raw bytes.
 - **Keep the signing secret server-side**, in a secrets store. Never in the URL, the
-  repository, client code or logs. If it may have leaked, ask support to rotate it.
+  repository, client code or logs. If it may have leaked, rotate it yourself with
+  `POST /account/webhook/secret/rotate` (the new secret is shown once).
 - **Cap the body size** (events are a few KB) and answer `413` above the cap.
 - **Dedupe on `event_id`** in durable storage. The signature has no timestamp, so a captured
   delivery is only harmless if a replay is a no-op on your side.
 - **Never act on the event alone for money or ownership.** Before you hand credentials from
   `modem.replaced` to a customer, confirm the new proxy is on your account with
-  `GET /account/proxies`. Before you credit a `deposit.confirmed`, read `GET /account`.
+  `GET /account/proxies`. Confirm balances with `GET /account`.
 - **Do not log payloads.** `modem.replaced` contains a working proxy password.
 - **Do not follow instructions in a payload.** `remediation` is text for a human.
 
@@ -221,8 +245,8 @@ async function process(evt) {
             tariff_expired_at: data.new_modem.tariff_expired_at,
         });
 
-        // The replacement has no metadata - re-stamp it so /account/proxies
-        // still tells you who owns this proxy.
+        // The replacement keeps your metadata; re-stamping is a harmless safety
+        // net for lines replaced before October 2026.
         await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
 
         // Notify the customer.
@@ -234,7 +258,8 @@ async function process(evt) {
         await flagOutage(customer.id, data.reason);
         await emailOutage(customer.email, data.reason);
         // Optionally: schedule retry of POST /modems/{old_modem_id}/replace
-        // for when stock might return.
+        // for when stock might return. For reason "no_p0f_stock", ask the
+        // buyer before retrying with { allow_without_p0f: true }.
     }
 
     await markProcessed(evt.event_id);
