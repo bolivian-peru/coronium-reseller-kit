@@ -4,16 +4,16 @@ This self-hosted Next.js example uses the current Coronium v3 API. It handles ac
 
 ## Run
 
-Use Node 20 or later and a persistent, writable disk. Copy `.env.example` to `.env` and set `CORONIUM_API_KEY`, `RESELLER_ADMIN_USER`, `RESELLER_ADMIN_PASSWORD`, and `CORONIUM_WEBHOOK_SECRET`. Keep `.env` outside source control.
+Use Node 20.12 or later and a persistent, writable disk. Copy `.env.example` to `.env` and set `CORONIUM_API_KEY`, `RESELLER_ADMIN_USER`, `RESELLER_ADMIN_PASSWORD`, and `CORONIUM_WEBHOOK_SECRET`. Keep `.env` outside source control.
 
 ```bash
 npm ci
 npm run build
 npm run start       # terminal 1
-npm run worker      # terminal 2; required for webhook reconciliation
+npm run worker      # terminal 2; reads .env too; required for webhook reconciliation
 ```
 
-Put an HTTPS reverse proxy in front of the dashboard. The Basic-auth operator login protects every page and API route except the signed webhook receiver. Use a long unique password. Back up `data/reseller.db` and its SQLite WAL files together. Run one Next.js instance against the SQLite file; multiple instances need a shared database and coordinated workers.
+Put an HTTPS reverse proxy in front of the dashboard and set `RESELLER_PUBLIC_URL` to the URL the browser opens (for example `https://dash.example.com`). Writes (add or delete customer, buy, renew) are refused with `403 Invalid origin` unless the browser's `Origin` matches that URL, the origin in the proxy's `X-Forwarded-Proto`/`X-Forwarded-Host` (or `Host`) headers, or the listen address. The Basic-auth operator login protects every page and API route except the signed webhook receiver. Use a long unique password. Back up `data/reseller.db` and its SQLite WAL files together. Run one Next.js instance against the SQLite file; multiple instances need a shared database and coordinated workers.
 
 **Do not deploy this SQLite example unchanged to Vercel or another ephemeral serverless filesystem.** Its customer mappings and webhook inbox must survive restarts and retries. Use a persistent VM/container volume, or replace the storage layer with a durable database before serverless deployment.
 
@@ -30,6 +30,8 @@ curl -X PUT https://api.coronium.io/api/v3/account/webhook \
 curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
   -H "Authorization: Bearer $CORONIUM_API_KEY"
 ```
+
+Or set `RESELLER_PUBLIC_URL` in `.env` and run `npm run register-webhook`. It reads the current registration, registers `<RESELLER_PUBLIC_URL>/api/coronium/webhook` only if it differs, refuses to run before the signing secret exists, and prints the signed test delivery result.
 
 The receiver verifies the raw-body HMAC, writes each `event_id` once to SQLite, then acknowledges it. `npm run worker` polls the local protected reconciliation route every 30 seconds. It re-stamps `metadata` on an auto-swap replacement using the durable local modem/customer map. Failed purchases and dead modems stay visible as **review** events; you must contact affected customers. A replacement also changes connection details: notify the end-customer through your own CRM or messaging workflow. This example does not send customer email.
 

@@ -27,7 +27,7 @@ Your actual margin depends on:
 
 - **Support quality.** If you handle 24/7 chat in your customer's language, you can charge 2× the wholesale. If you're API-only with email support, stay at 1.3×.
 - **Short paid plan / first-month discount.** Most customers won't sign up at full price. Plan for ~50% conversion from a short paid plan to monthly.
-- **Refund rate.** Mobile modems are flaky. Plan for ~5-10% of customers asking for a refund within their first month. Build that into your margin.
+- **Refund rate.** Mobile modems are flaky. Plan for ~5-10% of customers asking for a refund within their first month. Any refund you grant your own customer comes out of your margin, so build that in.
 - **Payment-processing fees.** If you accept Stripe, that's 2.9% + $0.30. Crypto is cheaper but tax-complicated. Subtract from your margin.
 
 ## Don't undercut
@@ -54,9 +54,9 @@ const monthlyMargin = 30 * (monthlyPrice - wholesaleMonthly);
 
 ## Subscription vs pay-per-use
 
-Coronium charges monthly per modem. You can resell:
+Coronium charges per line for the tariff period you buy (day, week or month), debited from your balance up front at purchase and at each renewal. You can resell:
 
-- **Monthly subscription** (simplest). Match Coronium's billing cadence. Customer pays you on the 1st, you pay Coronium from balance throughout the month.
+- **Monthly subscription** (simplest). Resell Coronium's monthly tariff and renew it each period. Collect from your customer before the renewal debits your balance.
 - **Pay-per-use** with hourly billing. Wrap each modem in a meter, bill customer per hour they actively use it. More work, higher prices possible, but you carry the inventory risk between sessions.
 - **Bundle** (for example 10 modems for one monthly price). Bulk discount. Common for agency customers.
 

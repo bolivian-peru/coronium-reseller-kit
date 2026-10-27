@@ -43,10 +43,15 @@ Applies to the two balance lanes, which is what resellers use:
 
   "line_items": [
     {
+      "kind": "modem",
       "modem_id": "6a5f…",          // null on purchase (stock isn't chosen yet)
-      "plan": "30-Day Plan",
+      "name": null,                 // the line's name on a renewal, null on purchase
+      "tariff_id": "65a1…",
+      "country_id": "64f0…",
+      "carrier_id": "all",          // "all" when the plan is not tied to one carrier
+      "plan": "month",              // the term period: day | week | month
       "days": 30,
-      "pricing_basis": "tariff",    // tariff | plan_fixed | legacy_per_day
+      "pricing_basis": "plan_fixed", // plan_fixed | legacy_per_day (a purchase is always plan_fixed)
       "quantity": 1,
       "unit_price_usd": 99,
       "line_total_usd": 99
@@ -173,7 +178,7 @@ Every proxy in `data[]`, and every proxy from `GET /api/v3/account/proxies`, now
 |---|---|
 | `configured` | `false` ⇒ you have no `https` webhook URL registered, so **no event is coming**. Fix with `PUT /api/v3/account/webhook`. |
 | `event_id` | The id the delivered event will carry. **Correlate on this**, and dedupe on it. |
-| `status` | About our **outbox**: `queued` (durably recorded) · `not_configured` · `disabled` · `error` |
+| `status` | About our **outbox**: `queued` (durably recorded) · `not_configured` · `error` |
 | `delivery` | The outbox row's state at response time - normally `pending`, because delivery happens after this response is already on the wire. |
 
 **`status: "queued"` does not mean delivered.** It means the event is durably stored and the
@@ -182,6 +187,31 @@ the correlation key.
 
 This exists so "Coronium never sent it" and "our receiver is down" stop looking identical.
 If `configured` is `false`, stop debugging your receiver - nothing was ever going to arrive.
+
+---
+
+## Approved price and payment refusals
+
+Send `max_total_usd` on every buy and renew: the total the buyer approved, in USD. For a
+renewal take `total_usd` from `POST /payment/renewal-quote`; for a buy, the total you showed
+(tariff `price` x `modemCount`, less any coupon). The server compares it with the total it
+is about to charge, before any debit.
+
+```js
+const q = await renewalQuote({ modems: [{ modem_id, days: 30 }] });
+// ... the buyer approves q.total_usd ...
+await renew({ modems: [{ modem_id, days: 30 }], max_total_usd: q.total_usd }, { idempotencyKey });
+```
+
+| Answer | Meaning | What to do |
+|---|---|---|
+| `409 price_changed` | The server total is above `max_total_usd`. Nothing was charged; `quote` (`total_usd`, `total_cents`, `line_items`) is the current price | Show `quote.total_usd`, ask again, send the new approval with a new `Idempotency-Key` |
+| `400 insufficient_balance` | Account credit is below the total (`reason_code` `INSUFFICIENT_CREDIT`, with `available_usd` and `required_usd`). Nothing was charged | Add funds in the dashboard, then retry |
+| `401 "Insufficient crypto balance"` (BTC lane, `code` `internal_error`) | The BTC balance is below the total; `required` and `available` are in BTC. Nothing was charged. Your API key is fine | Fund the BTC balance or use the account-credit lane. Do not regenerate the key |
+| `409 duplicate_request` | `new_order_created: false`. `reason`: `idempotency_key_conflict` (key reused with a different body), `recent_identical_request` (same request without a key within 180 s, `Retry-After`), `request_in_progress`, `request_outcome_unknown`, `legacy_request_identity_unknown` | Do not switch to a new key to get past it. Check `GET /account/payments` and `GET /account/proxies` first |
+| `409 renewal_already_pending` (account-credit renewal) | A renewal for that line was already paid and is still being applied (`payment_id`). Nothing was charged | Do not retry; follow `GET /payments/{payment_id}/status` |
+| `429 renewal_burst` (account-credit renewal) | That line was renewed 3 times in the last 10 minutes. Nothing was charged | Wait 10 minutes, or renew once for a longer term |
+| `202` with `paymentId` | Charged, still provisioning | Not an error and not a reason to order again: follow `GET /payments/{paymentId}/status` |
 
 ---
 

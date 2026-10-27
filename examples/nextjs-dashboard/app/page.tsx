@@ -88,7 +88,7 @@ export default async function HomePage() {
                                 )
                             }
                         </h2>
-                        <span className="text-xs text-zinc-500">{list.length} proxy{list.length === 1 ? '' : 'ies'}</span>
+                        <span className="text-xs text-zinc-500">{list.length} {list.length === 1 ? 'proxy' : 'proxies'}</span>
                     </header>
                     <table className="w-full text-sm">
                         <thead>

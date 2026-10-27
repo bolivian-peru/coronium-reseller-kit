@@ -34,9 +34,25 @@ export function RenewForm({ modemId, customerId }: { modemId: string; customerId
                 body: JSON.stringify({ ...payload, action, idempotency_key: intent?.key, expected_total_cents: quote?.total_cents }),
             });
             const data = await response.json();
+            if (response.status === 409 && data?.quote?.total_cents != null) {
+                // Price changed, nothing charged: show the new total and ask again with a new key.
+                sessionStorage.removeItem(storageKey);
+                setQuote(data.quote);
+                setMessage(`Price changed to $${Number(data.quote.total_usd).toFixed(2)}. Nothing was charged. Confirm again to renew.`);
+                return;
+            }
+            if (data?.refunded === true) {
+                // Refunded at once: nothing was charged, a new renewal is safe.
+                sessionStorage.removeItem(storageKey);
+                setMessage('Not charged (refunded to balance). Retry shortly.');
+                return;
+            }
+            if (!response.ok && data?.payment_id) throw new Error(`${data.error || `Request failed (${response.status})`} Payment ${data.payment_id}: charged - check GET /payments/${data.payment_id}/status before starting a new renewal.`);
             if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
             if (action === 'quote') setQuote(data);
-            else if (response.status === 202) setMessage(data.error);
+            else if (response.status === 202) setMessage(data?.payment_id
+                ? `Charged, the renewal is still being applied. Payment ${data.payment_id}: follow GET /payments/${data.payment_id}/status and do not renew again meanwhile.`
+                : data.error);
             else {
                 sessionStorage.removeItem(storageKey);
                 setQuote(null);

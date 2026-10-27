@@ -32,7 +32,7 @@ export async function proxy(req: NextRequest) {
         // Browsers attach cached Basic credentials to cross-site requests, so a
         // state-changing call must prove it came from this dashboard's own pages.
         const origin = req.headers.get('origin');
-        if (origin && origin !== req.nextUrl.origin) return new NextResponse('Invalid origin', { status: 403 });
+        if (origin && !allowedOrigins(req).has(origin)) return new NextResponse('Invalid origin', { status: 403 });
         const site = req.headers.get('sec-fetch-site');
         if (site && site !== 'same-origin' && site !== 'none') return new NextResponse('Invalid origin', { status: 403 });
     }
@@ -45,6 +45,23 @@ export async function proxy(req: NextRequest) {
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('Referrer-Policy', 'no-referrer');
     return response;
+}
+
+// The origin the browser actually used. Under `next start` req.nextUrl.origin is the
+// listen address (http://localhost:<port>), not the public URL behind a reverse proxy,
+// so also accept the origin built from the forwarded or Host headers and, when set,
+// RESELLER_PUBLIC_URL. A cross-site page cannot forge these: its Origin is its own.
+function allowedOrigins(req: NextRequest) {
+    const allowed = new Set<string>([req.nextUrl.origin]);
+    const first = (value: string | null) => value?.split(',')[0].trim() || '';
+    const proto = first(req.headers.get('x-forwarded-proto')) || req.nextUrl.protocol.replace(/:$/, '');
+    const host = first(req.headers.get('x-forwarded-host')) || first(req.headers.get('host'));
+    if (host) allowed.add(`${proto}://${host}`);
+    const configured = process.env.RESELLER_PUBLIC_URL;
+    if (configured) {
+        try { allowed.add(new URL(configured).origin); } catch { /* Ignore a malformed value. */ }
+    }
+    return allowed;
 }
 
 async function equal(a: string, b: string) {

@@ -7,7 +7,9 @@
  * Run it:
  *
  *   npm install
- *   CORONIUM_WEBHOOK_SECRET=<ask support> node server.js
+ *   curl -X POST https://api.coronium.io/api/v3/account/webhook/secret/rotate \
+ *     -H "Authorization: Bearer $CORONIUM_API_KEY"   # secret is shown once, store it
+ *   CORONIUM_WEBHOOK_SECRET=<secret from POST /api/v3/account/webhook/secret/rotate, shown once> node server.js
  *
  * Then register your URL with Coronium:
  *
@@ -97,6 +99,37 @@ async function processEvent(body) {
         case 'modem.replaced': {
             console.log(`[event] modem.replaced: ${data.old_modem_id} → ${data.new_modem_id}`);
             //
+            // Key on data.new_modem_id (always present on modem.replaced). It
+            // equals data.old_modem_id when the line was moved instead of
+            // swapped: same login, password and expiry, only the ports may
+            // change. Your own /replace that moves the line and keeps the same
+            // ports sends no event. The automatic swap sends one, and a second
+            // one (other shape) when the ports changed: dedupe. A line moved
+            // automatically after ~30 min offline sends one only when the
+            // ports changed, in the { id, login, ... } shape only.
+            //
+            // new_modem comes in two shapes. Your own /replace on a classic line
+            // and the automatic swap (also when it moved the line) send { _id,
+            // proxy_login, proxy_password, tariff_expired_at, ... }. A replacement
+            // by support and the notice for a moved line whose ports changed
+            // send { id, login, password, expires_at, http_url, socks_url, ... },
+            // plus socks_host / socks_login / socks_password when SOCKS5 differs.
+            // Read both spellings; never log the result (it holds passwords).
+            const nm = data.new_modem || {};
+            const creds = {
+                modem_id: data.new_modem_id || nm._id || nm.id,
+                host: nm.host,
+                http_port: nm.http_port,
+                socks_port: nm.socks_port,
+                socks_host: nm.socks_host || nm.host,
+                login: nm.proxy_login ?? nm.login,
+                password: nm.proxy_password ?? nm.password,
+                socks_login: nm.socks_login ?? nm.proxy_login ?? nm.login,
+                socks_password: nm.socks_password ?? nm.proxy_password ?? nm.password,
+                expires_at: nm.tariff_expired_at ?? nm.expires_at,
+            };
+            const needsRefetch = !creds.host || !creds.login || !creds.http_port || !creds.socks_port;
+            //
             // 1) Look up the end-customer who owned the old modem.
             //    Your code knows this because you stamped metadata.customer_id
             //    on the modem when you bought it via:
@@ -104,27 +137,26 @@ async function processEvent(body) {
             //      { tariff_id: ..., modemCount: 1,
             //        metadata: "{\"customer_id\":\"acme-007\"}" }
             //
-            // 2) Update your CRM / Stripe customer metadata / DB row:
-            //      - modem_id          : data.new_modem_id (was data.old_modem_id;
-            //                            can be equal when the line was moved)
-            //      - host              : data.new_modem.host
-            //      - http_port         : data.new_modem.http_port
-            //      - socks_port        : data.new_modem.socks_port
-            //      - proxy_login       : data.new_modem.proxy_login
-            //      - proxy_password    : data.new_modem.proxy_password
-            //      - tariff_expired_at : data.new_modem.tariff_expired_at
+            // 2) If needsRefetch (new_modem missing, or host, login or ports
+            //    empty), re-read the line with GET /api/v3/account/proxies by
+            //    data.new_modem_id first. Confirming it there is good practice
+            //    anyway before you hand out credentials.
             //
-            // 3) Email the customer the new credentials (their old ones are dead).
-            //    The new modem is in the same country, with the same remaining
-            //    paid time - they don't lose anything, but the URL changes.
+            // 3) Update your CRM / DB row from `creds`, mapping
+            //    data.old_modem_id -> creds.modem_id. Store passwords encrypted.
             //
-            // 4) The replacement keeps your metadata. Re-stamping is a harmless
+            // 4) Notify the customer with the current connection details.
+            //    The line is in the same country, with the same remaining paid
+            //    time - they don't lose anything, but the details may change.
+            //
+            // 5) The replacement keeps your metadata. Re-stamping is a harmless
             //    safety net for lines replaced before October 2026:
             //      PUT /api/v3/modems/{data.new_modem_id}/set-metadata
             //
-            // Key on data.new_modem._id. new_modem.IMEI / portId are deprecated
-            // aliases of it and disappear on 2026-11-19. A replaced p0f line
-            // adds data.p0f = { required, kept, os, os_applied, pending?, note? }.
+            // Do not rely on new_modem.IMEI / portId (deprecated, removed on
+            // 2026-11-19). A replaced p0f line adds
+            // data.p0f = { required, kept, os, os_applied, pending?, note? }.
+            if (needsRefetch) console.log(`[event] modem.replaced: refetch ${creds.modem_id} from /account/proxies`);
             break;
         }
 
@@ -143,10 +175,13 @@ async function processEvent(body) {
             //
             // Recommended:
             //   1) Flag the modem in your local state.
-            //   2) Notify the end-customer and offer a manual replacement
-            //      (call POST /api/v3/modems/{old_modem_id}/replace yourself -
-            //      it may succeed later when stock returns).
-            //   3) Optionally retry /replace on a schedule.
+            //   2) Notify the end-customer. Call POST /replace yourself only if
+            //      the line's proxyEndpoints.capabilities.replace is not false.
+            //   3) Retry on a schedule only while the answer is a stock shortage
+            //      (400 "No free modems!") or 409 p0f_replacement_unavailable
+            //      (after the buyer agreed to lose p0f). Stop at once on any other
+            //      409 (code action_unsupported, or internal_error with a
+            //      "contact support" error) and open a support ticket instead.
             break;
         }
 

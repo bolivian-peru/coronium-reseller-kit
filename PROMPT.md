@@ -13,7 +13,7 @@ proxies with these features (skip any I don't list):
 - Signed webhook handler at /api/coronium/webhook: verify HMAC, persist by
   event_id, then ack 200. A durable worker reconciles replacements and flags
   modem.dead or purchase-failed events for operator review.
-- Health overview: poll /account/proxies/health every 60s, highlight dead modems
+- Health overview: poll /account/proxies/health at most every 60s (it is not real-time; most lines refresh every 30 min), highlight dead modems
 - API-only integration instructions: Bearer authentication, account balances,
   tariff stock with X-Coronium-Proxy-Credentials: separate-protocol-v1 on stock
   and purchase calls, renewal quote, renewal, separate HTTP/SOCKS5 endpoints,
@@ -43,18 +43,40 @@ separately. Store customer mappings durably. No dashboard is required.
 ```
 Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
 and build me a Telegram bot that takes /buy and /rotate commands. Customer
-identity = Telegram user_id. Use Telegraf for the bot, coronium-sdk for the
-API. Crypto payment: accept TON or USDT-TRC20 directly to my wallet, then
-top up my Coronium balance with the net.
+identity = Telegram user_id. Use Telegraf for the bot, and call the API through
+the typed client in examples/nextjs-dashboard/lib/coronium.ts (server-side only,
+the same client AGENTS.md uses). For /rotate follow AGENTS.md rule 8 and the
+failure table: 200 rotated:true/false on classic lines; 202 pending:true -> poll
+rotation-status, never resubmit; 429 -> wait Retry-After; a 409 on a line with
+proxyEndpoints -> branch on code + suggested_action, never on the status alone,
+and if the error says the last rotation is under review, tell the user and stop.
+Crypto payment: end-customers pay me in my own wallet (TON or USDT-TRC20). Do
+not automate funding Coronium and never send funds on-chain from my wallet.
+Coronium has no top-up API. I fund my Coronium balance myself, as account credit
+(dashboard) or BTC (deposit address from GET /account/crypto-balance). USDT
+deposited at Coronium is not spent by the API purchase routes. Before each buy,
+read GET /account and use buy-with-account-credit (accountCredit) or
+buy-modems-with-crypto-balance (BTC only). Buy only after I approve the quoted
+total, and send that approved total as max_total_usd on the buy (and the
+renewal-quote total_usd on a renewal). A 409 price_changed means nothing was
+charged: show me quote.total_usd and ask again. A 409 duplicate_request is not a
+reason to use a new Idempotency-Key; a 202 with paymentId is charged and still
+provisioning, not a failure.
 ```
 
 **For a webhook-only integration** (reseller already has a CRM, just wants the auto-swap event flow):
 
 ```
-Read https://github.com/bolivian-peru/coronium-reseller-kit/blob/main/examples/webhook-receiver/
-and graft the modem.replaced + modem.dead handlers into my existing Express
-app at /api/coronium/webhook. The handler should update my CRM (Stripe
-customer metadata) with the new modem credentials atomically.
+Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
+(webhook contract) and examples/webhook-receiver/, then graft a handler into my
+existing Express app at /api/coronium/webhook. The handler verifies
+X-Coronium-Signature over the raw body, persists the event keyed by event_id and
+acks 200 within 5 s (non-2xx only if storage fails). A separate idempotent worker
+then processes the inbox: map data.old_modem_id -> data.new_modem_id on my Stripe
+customer (store the modem _id, never the proxy password), refetch the line from
+GET /account/proxies for the current connection details, re-stamp metadata on the
+new modem, notify my customer through my own channel, and handle modem.dead
+reasons including no_p0f_stock.
 ```
 
 ## After Claude finishes

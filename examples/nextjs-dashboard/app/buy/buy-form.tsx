@@ -32,6 +32,7 @@ export function BuyForm({
     const [busy, setBusy] = useState(false);
     const [result, setResult] = useState<any>(null);
     const [err, setErr] = useState<string | null>(null);
+    const [notice, setNotice] = useState<string | null>(null);
 
     const tariffsForCountry = useMemo(
         () => inStock.filter((t) => t.country_code === country),
@@ -48,8 +49,12 @@ export function BuyForm({
         e.preventDefault();
         setBusy(true);
         setErr(null);
+        setNotice(null);
         setResult(null);
-        const payload = { tariff_id, modemCount: count, customer_id, tag: tag || null, lane, need_p0f: needP0f && p0fCount > 0 };
+        // The estimate shown below is the approved total: Coronium refuses with
+        // 409 price_changed (nothing charged) if its own total is higher.
+        const max_total_usd = selectedTariff ? Math.round(Number(selectedTariff.price) * count * 100) / 100 : undefined;
+        const payload = { tariff_id, modemCount: count, customer_id, tag: tag || null, lane, need_p0f: needP0f && p0fCount > 0, max_total_usd };
         const serialized = JSON.stringify(payload);
         const storageKey = `coronium-pending-buy:${serialized}`;
         let intent: { key: string; createdAt: number } | null = null;
@@ -70,7 +75,24 @@ export function BuyForm({
                 body: JSON.stringify({ ...payload, idempotency_key: intent.key }),
             });
             const body = await r.json();
+            if (r.status === 202 && body?.payment_id) {
+                // Charged, still provisioning: not an error. Keep the idempotency key.
+                setNotice(`Charged, proxies are still being provisioned. Payment ${body.payment_id}: follow GET /payments/${body.payment_id}/status and do not start a new order for this selection.`);
+                return;
+            }
+            if (body?.refunded === true) {
+                // 503 OUT_OF_STOCK / UPSTREAM_DEGRADED after an immediate refund: nothing
+                // was charged and the API released the idempotency key, so a new order is safe.
+                sessionStorage.removeItem(storageKey);
+                setNotice('Not charged (refunded to balance). Pick another plan or retry shortly.');
+                return;
+            }
+            if (r.status === 409 && body?.code === 'price_changed') {
+                sessionStorage.removeItem(storageKey);
+                throw new Error(`The price is now $${Number(body.quote?.total_usd).toFixed(2)}. Nothing was charged. Reload the page to see current prices before buying.`);
+            }
             if (r.status === 202) throw new Error(body?.error || 'Purchase status is uncertain; check the account before retrying.');
+            if (!r.ok && body?.payment_id) throw new Error(`${body?.error || `Failed (${r.status})`} Payment ${body.payment_id}: charged - check GET /payments/${body.payment_id}/status before starting a new order.`);
             if (!r.ok) throw new Error(body?.error || `Failed (${r.status})`);
             sessionStorage.removeItem(storageKey);
             setResult(body);
@@ -157,16 +179,17 @@ export function BuyForm({
                 )}
 
                 <div className="md:col-span-2 flex items-center justify-between">
+                    {notice && <span className="text-amber-300 text-sm">{notice}</span>}
                     {err && <span className="text-red-400 text-sm">{err} Retry with the same selection to check the original order before starting another.</span>}
                     <button className="btn" type="submit" disabled={busy || !tariff_id || !customer_id}>
-                        {busy ? 'Buying…' : `Buy ${count} proxy${count === 1 ? '' : 'ies'}`}
+                        {busy ? 'Buying…' : `Buy ${count} ${count === 1 ? 'proxy' : 'proxies'}`}
                     </button>
                 </div>
             </form>
 
             {result?.data && (
                 <div className="card mt-6 border-emerald-700/60 bg-emerald-900/20">
-                    <h2 className="font-medium mb-3 text-emerald-300">✓ {result.data.length} proxy{result.data.length === 1 ? '' : 'ies'} provisioned</h2>
+                    <h2 className="font-medium mb-3 text-emerald-300">✓ {result.data.length} {result.data.length === 1 ? 'proxy' : 'proxies'} provisioned</h2>
                     <pre className="text-xs font-mono whitespace-pre-wrap break-all bg-zinc-950 border border-zinc-800 rounded p-3">{JSON.stringify(result.data, null, 2)}</pre>
                 </div>
             )}

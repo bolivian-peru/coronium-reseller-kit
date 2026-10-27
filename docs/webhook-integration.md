@@ -8,15 +8,19 @@ Mobile modems fail. Phones overheat, SIMs deactivate, carrier networks reroute, 
 
 With the Coronium webhook flow:
 
-1. Coronium detects an eligible failed modem with remaining paid time
-2. If the provider and stock support replacement, Coronium provisions a replacement
+1. Coronium detects an eligible failed modem: 8 consecutive failed 30-minute health checks (about 4 hours), more than 24 hours of paid time left, an HTTPS webhook registered on the account, and not still reported online by the provider
+2. If the provider and stock support replacement, Coronium provisions a replacement (or moves the line, see below)
 3. The original `tariff_expired_at` and your `metadata` are transferred - your customer doesn't lose paid time
 4. The old modem is quarantined to a system bucket
-5. Coronium POSTs an event to your webhook URL with old + new modem IDs and full credentials
-6. Your handler updates the customer's record with the new credentials
-7. You notify the customer that credentials have changed
+5. Coronium POSTs an event to your webhook URL with old + new modem IDs and the connection details
+6. Your handler refetches the line from `GET /account/proxies` and updates the customer's record
+7. You notify the customer that connection details have changed
+
+After an event is sent for a line, that line gets no new attempt for 72 hours. `/account/proxies/health` already reports `dead` from 3 consecutive failures, so poll it to warn your customer earlier.
 
 This is conditional on provider capability and available stock. Do not promise a fixed recovery time.
+
+The 8-failure, webhook and 24 hour rules apply to this swap only. Some lines are also moved automatically after about 30 minutes offline, without a webhook (see `modem.replaced` below). Such a move keeps the credentials and sends an event only when the ports changed.
 
 ## Registering your webhook URL
 
@@ -85,12 +89,22 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 }
 ```
 
-Same payload for every replacement. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
+`data.old_modem_id` and `data.new_modem_id` are always present. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
 
-- Key on `new_modem._id`. `IMEI` and `portId` are **deprecated** aliases that carry the same `_id` (never a hardware or port id) and are removed on **2026-11-19**.
+The `new_modem` block comes in one of two shapes:
+
+- **Your own `/replace` on a classic line, and the automatic swap (also when it moved the line):** the shape above, with `_id`, `proxy_login`, `proxy_password` and `tariff_expired_at`. The automatic swap can arrive without `new_modem`.
+- **A replacement by support, and the notice for a moved line whose ports changed (the only shape an offline-move notice uses):** `{id, name, host, login, password, http_port, socks_port, http_url, socks_url, expires_at}`, with an optional `rotation_link`, and `socks_host`, `socks_login` and `socks_password` when SOCKS5 uses different details. These also carry `data.old_modem_name` and `data.reason`.
+
+Some lines are moved instead of swapped. This can happen on an automatic replacement or on your own `POST /modems/:id/replace`. On a move, `new_modem_id` equals `old_modem_id` and the `/replace` answer has `moved: true`. The line keeps its id, login, password and expiry, and only the ports may change. Your own `/replace` that moves the line and keeps the same ports sends no `modem.replaced` event, so treat the synchronous `/replace` answer (`moved: true`) as the source of truth. The automatic swap below sends `modem.replaced` with `new_modem_id` equal to `old_modem_id` when it moved the line, and can send it twice (once in each `new_modem` shape) when the ports changed.
+
+Separately, some lines are moved automatically after about 30 minutes offline. This needs no webhook and no 8 failures, and runs with as little as 1 hour of paid time left. Such a move keeps id, login, password and expiry. It sends `modem.replaced` only when the ports changed, and then only in the `{id, login, password, expires_at, http_url, socks_url}` shape (with `reason` "moved to a working device, new port numbers"). A move that keeps the same ports sends no event. Every move writes a `proxy.moved` row to `GET /account/history`. If you have no webhook, poll `GET /account/history` for `proxy.moved` (or reread `GET /account/proxies`) to catch port changes.
+
+Dedupe on `event_id` and on a repeat `new_modem_id`, and refetch the line from `GET /account/proxies`.
+
+- Key on `data.new_modem_id`, and refetch the line from `GET /account/proxies` before you hand out credentials. If you read `new_modem`, read both spellings (`proxy_login ?? login`, `tariff_expired_at ?? expires_at`).
+- Do not rely on `new_modem.IMEI` / `portId`. They are **deprecated**, removed on **2026-11-19**, and are not ids you can use on every path.
 - A replaced p0f line adds `data.p0f`: `{required, kept, os, os_applied, pending?, note?}`. See [p0f and OpenVPN](./p0f-and-openvpn.md#4-replacing-a-p0f-line).
-- On some line types the line is moved instead of swapped: `new_modem_id` equals `old_modem_id` and only the ports change. Update the credentials either way.
-- Replacements by support may add `old_modem_name` and `reason`.
 
 ### `modem.dead` - auto-swap couldn't complete
 
@@ -135,6 +149,8 @@ Treat any value you do not know as "not replaced".
 
 The three history events are off unless you send `PUT /account/webhook` with `{"history_events": true}`. Their proxy descriptor is `{proxy_id, modem_id, name, country, expires_at}`; `actor.kind` is `api` for your own calls, so you can ignore your own changes.
 
+The same changes can be read without a webhook from `GET /api/v3/account/history` (follow `next_cursor`; `partial: true` means the page may be incomplete).
+
 There is no deposit event for resellers: confirm a top-up with `GET /account`.
 
 Each entry in `proxies[]` is `{proxy_id, modem_id, country, carrier, http_port, socks_port, ext_ip, expires_at}`.
@@ -168,7 +184,7 @@ delivery worker owns it. Full field reference: [billing-and-reconciliation.md](b
 - **Durable, with retries.** Up to **8 attempts** (immediately, then after 5 s, 30 s, 5 min, 30 min, 2 h, 6 h and 24 h; the last about 32.6 h after the first), then dead-letter (Coronium is alerted and can replay). A non-2xx WILL be redelivered, so your handler must be idempotent - dedupe on `event_id`.
 - **5-second timeout.** Ack fast, process async. A slow 200 counts as a failure and gets retried. (`POST /account/webhook/test` waits up to 8 s.)
 - **Redirects are not followed.** Register the final URL.
-- **Cooldown per modem** on the dead-modem path - you won't get two swap events for the same modem back-to-back.
+- **Cooldown per modem** on the dead-modem path - after an event is sent for a line, it gets no new attempt for 72 hours.
 - **No ordering guarantee.** Use `occurred_at` and fresh proxy state before changing customer assignments.
 
 ## Security checklist for your receiver
@@ -234,23 +250,34 @@ async function process(evt) {
         // was stamped when you bought it).
         const customer = await findCustomerByOldModemId(data.old_modem_id);
 
+        // new_modem has two shapes (see above): read both spellings, and
+        // refetch the line when anything is missing.
+        const nm = data.new_modem || {};
+        let creds = {
+            modem_id: data.new_modem_id,   // always present; equals old_modem_id on a move
+            host: nm.host,
+            http_port: nm.http_port,
+            socks_port: nm.socks_port,
+            socks_host: nm.socks_host || nm.host,
+            login: nm.proxy_login ?? nm.login,
+            password: nm.proxy_password ?? nm.password,
+            socks_login: nm.socks_login ?? nm.proxy_login ?? nm.login,
+            socks_password: nm.socks_password ?? nm.proxy_password ?? nm.password,
+            expires_at: nm.tariff_expired_at ?? nm.expires_at,
+        };
+        if (!creds.host || !creds.login || !creds.http_port) {
+            creds = await refetchLine(data.new_modem_id); // GET /api/v3/account/proxies
+        }
+
         // Update mapping atomically - single write, single source of truth.
-        await updateCustomer(customer.id, {
-            modem_id: data.new_modem_id,
-            host: data.new_modem.host,
-            http_port: data.new_modem.http_port,
-            socks_port: data.new_modem.socks_port,
-            proxy_login: data.new_modem.proxy_login,
-            proxy_password: data.new_modem.proxy_password,
-            tariff_expired_at: data.new_modem.tariff_expired_at,
-        });
+        await updateCustomer(customer.id, creds);
 
         // The replacement keeps your metadata; re-stamping is a harmless safety
         // net for lines replaced before October 2026.
         await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
 
-        // Notify the customer.
-        await emailNewCredentials(customer.email, data.new_modem);
+        // Notify the customer with the current connection details.
+        await emailNewCredentials(customer.email, creds);
     }
 
     if (evt.event === 'modem.dead') {
@@ -258,8 +285,11 @@ async function process(evt) {
         await flagOutage(customer.id, data.reason);
         await emailOutage(customer.email, data.reason);
         // Optionally: schedule retry of POST /modems/{old_modem_id}/replace
-        // for when stock might return. For reason "no_p0f_stock", ask the
-        // buyer before retrying with { allow_without_p0f: true }.
+        // for when stock might return, only if the line's
+        // proxyEndpoints.capabilities.replace is not false. For reason
+        // "no_p0f_stock", ask the buyer before retrying with
+        // { allow_without_p0f: true }. Stop at once on any other 409
+        // (action_unsupported, or internal_error and a "contact support" error).
     }
 
     await markProcessed(evt.event_id);
@@ -295,8 +325,8 @@ For offline branch tests, use a synthetic envelope with event-specific fields un
 
 ## When the webhook is NOT enough
 
-The webhook covers REACTIVE auto-swap (modem died → replace). For PROACTIVE detection (modem is degrading but not dead yet), poll `GET /api/v3/account/proxies/health` every 5 minutes. The `status` field carries `degraded` even before the webhook fires.
+The webhook covers REACTIVE auto-swap (modem died → replace). For PROACTIVE detection (modem is degrading but not dead yet), poll `GET /api/v3/account/proxies/health` every 1-5 minutes (most lines refresh every 30 minutes server-side; Coronium Node lines reflect the device connection). The `status` field carries `degraded` even before the webhook fires.
 
 ## Why not WebSockets / SSE?
 
-WebSockets require both sides to maintain a persistent connection - a webhook URL only needs to be online when an event fires, which is rare (most resellers see <10 events/month). For events that need real-time push (sub-second), use the `/account/proxies/health` polling path with a 30s interval.
+WebSockets require both sides to maintain a persistent connection - a webhook URL only needs to be online when an event fires, which is rare (most resellers see <10 events/month). The health endpoint is not real-time; poll it every 1-5 minutes and rely on the webhook for replacements.

@@ -41,10 +41,10 @@ fields.
 | | Classic proxy | Row with `proxyEndpoints` (one-time rental) |
 |---|---|---|
 | Recognise it | No `proxyEndpoints` | `proxyEndpoints` present |
-| Rotation | `POST /restart` answers 200 with `rotated` | `POST /restart` answers **202** `pending: true`; poll `GET /modems/{id}/rotation-status` until `done` or `failed` |
+| Rotation | `POST /restart` answers 200 with `rotated`; `429` within 60 s of the last rotation | `POST /restart` answers **202** `pending: true`; poll `GET /modems/{id}/rotation-status` until `done` or `failed`; a refusal changes nothing: `409` (`modem_rotation_in_progress`, `rotate_unavailable`, `modem_expired`), `429 rotation_too_soon` (wait `Retry-After`) or `502 rotation_unconfirmed` (poll, do not resend); `rotate_unavailable` + `check_proxy_health` = offline. Node specifics in [Coronium Node rows](#coronium-node-rows) |
 | Renewal | Explicit renewal; auto-renew where offered | Manual renewal only: `POST /payment/renewal-quote`, then a `/payment/renew-*` route |
-| Replace, cancel | Available | `409`; read `capabilities` |
-| OS fingerprint | Where `features.p0f.server_supported` is true | Never (`400 p0f_unsupported_on_server`) |
+| Replace | Available | `409`; read `capabilities` |
+| OS fingerprint | Where `features.p0f.server_supported` is true | Only when `proxyEndpoints.capabilities.p0f` is true; otherwise `400 p0f_unsupported_on_server`. `set-os` can answer `202` `pending: true` until the line confirms |
 
 `"autoRenew": true` on a buy is never filled from one-time-rental stock. If only such
 units are left the answer is `409 auto_renew_unavailable` (`retry_without_auto_renew`),
@@ -63,7 +63,44 @@ what to show from `capabilities`, not from the label.
 - `providerState` (`tunnel_connected`, `offline`, `unknown`) and `providerObservedAt`
   (epoch ms) report the device connection. `ext_ip` can be `null` until the device reports.
 - Rotation answers 202. Send a UUIDv4 `request_id` in the body to make a retry safe; at
-  most one request every two minutes.
+  most one request every two minutes. A refused rotate answers `409` and nothing is queued.
+  The body carries `error` (a readable reason), `code` and `suggested_action`.
+  - `modem_rotation_in_progress` / `poll_rotation_status`: a rotation is still running, poll
+    `GET /modems/{id}/rotation-status` and do not resend.
+  - `rotate_unavailable` / `retry_after_2_minutes`: the last request was under 2 minutes ago,
+    wait and retry once.
+  - `rotate_unavailable` / `check_capabilities`: the proxy is offline or rotation is not
+    available right now.
+  - `rental_conflict` / `refresh_inventory`: the rental is no longer on this account; reload
+    the proxy list.
+  - `503` with `error` "Rotation unavailable" (`code` `modem_rotation_in_progress`): rotation
+    is unavailable right now. Do not poll `rotation-status`; show it and try later.
+  - When `error` says the last rotation has no confirmed outcome and is under review, every
+    rotate on that line is refused until support resolves it. The code can be either
+    `rotate_unavailable` variant, so match on that text. Do not retry it in a loop and do not
+    replace. Show the message and contact support with the `request_id`.
+- If the device never confirms a rotation, `rotation-status` reports `state: "failed"` with
+  `reset_error: "device did not confirm the outcome"`. That is the "under review" case
+  above: ignore the status hint's "retry after 2 minutes" and show the line as "rotation
+  under review".
+- The token URL (`GET /modems/rotate-modem-by-token/{token}`) answers `202` with
+  `pending: true` and a `status_url` on these rows. Follow `status_url` as returned and do
+  not resend. Its refusals are `409`. Their `code` usually reads `modem_rotation_in_progress`
+  with `suggested_action` `poll_rotation_status` whatever the reason, and an ended or
+  foreign rental can come back as `internal_error`. Ignore both there and read `error`:
+  busy, too soon, "has no confirmed outcome and is under review" (stop and contact
+  support), or an active rental required (reload the proxy list). `503` carries the same
+  code; treat it as rotation unavailable now.
+  Its `status_url` may be on a neutral short-link host (for example
+  `https://ipreset.xyz/s/<token>`), outside `/api/v3`. Follow it as returned: it answers
+  the same `data` shape, but its errors carry only `error` (no `code`, `suggested_action`
+  or `request_id`), so branch on the HTTP status there. To get envelope codes, poll
+  `GET https://api.coronium.io/api/v3/modems/get-rotating-modem-status-by-token/{token}`
+  with the same token instead. Both answer
+  `{data: {status, ext_ip, rotated_at, command, providerState, rotation}}`, not the `state`
+  of `rotation-status`. Poll `data.rotation` until `pending` is false: `success: true` is
+  done, `needs_review: true` is under review (stop and contact support), any other `result`
+  is failed.
 - `capabilities.http`, `socks5` and `udp` say which protocols passed qualification of this
   exact device. `whitelist`, `usage` and `speedTest` enable `PUT /modems/{id}/set-white-list`,
   `GET /modems/{id}/usage` and `/modems/{id}/speed-test`. On a line of any other type these
@@ -72,7 +109,9 @@ what to show from `capabilities`, not from the label.
     or IPv6 `/48`-`/128`. Listed addresses connect without a password on `dedicated_port`
     (returned in the answer); `[]` removes password-less access.
   - Usage: `?days=1-366` (default 30) returns `totals` and per-UTC-day rows of the current
-    rental only.
+    rental only. `capabilities.usage` is false on every line today. A plan whose name ends
+    in ` - 20 GB/month only` includes 20 GB of mobile data per month; show usage only when
+    `capabilities.usage` is true.
   - Speed test: `POST` (optional UUIDv4 `request_id`) answers `202`; poll `GET` for
     `down_mbps`, `up_mbps`, `latency_ms`. One test per 10 minutes per proxy (`429` with
     `Retry-After`).

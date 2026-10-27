@@ -5,23 +5,43 @@
  * Answers the question every reseller has on day one: "is my key actually
  * working, and what can I do with it right now?" - before writing any code.
  *
- *   CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs
+ *   node examples/verify-integration.mjs
+ *
+ * It reads CORONIUM_API_KEY from the environment, or from
+ * examples/nextjs-dashboard/.env or ./.env (variables already set in the
+ * environment win). Reading .env needs Node 20.12+; on older Node export
+ * the variable: CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs
  *
  * Read-only by default: it never buys, rotates or changes anything. Add
  * --webhook-test to additionally fire one real signed test event at your
  * registered webhook URL (safe: it only POSTs to a URL you registered).
+ * A missing webhook is a warning until you deploy; add --require-webhook
+ * after deploy to count it as a failure.
  *
- * Zero dependencies - Node 18+ built-ins only.
+ * Zero dependencies - Node built-ins only.
  */
+
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Load .env files the reseller already filled in. process.loadEnvFile never
+// overwrites a variable that is already set.
+for (const file of [fileURLToPath(new URL('./nextjs-dashboard/.env', import.meta.url)), '.env']) {
+    if (existsSync(file) && typeof process.loadEnvFile === 'function') {
+        try { process.loadEnvFile(file); } catch { /* unreadable .env: fall back to the environment */ }
+    }
+}
 
 const BASE = process.env.CORONIUM_API_BASE || 'https://api.coronium.io/api/v3';
 const KEY = process.env.CORONIUM_API_KEY;
 const RUN_WEBHOOK_TEST = process.argv.includes('--webhook-test');
+const REQUIRE_WEBHOOK = process.argv.includes('--require-webhook');
 
 let failures = 0;
 
 const ok = (msg) => console.log(`  \x1b[32mPASS\x1b[0m  ${msg}`);
 const bad = (msg) => { failures++; console.log(`  \x1b[31mFAIL\x1b[0m  ${msg}`); };
+const warn = (msg) => console.log(`  \x1b[33mWARN\x1b[0m  ${msg}`);
 const note = (msg) => console.log(`        ${msg}`);
 
 async function call(path, init) {
@@ -87,9 +107,14 @@ async function main() {
         if (shapeOk) {
             const p0fRows = rows.filter((r) => r.p0f_count > 0);
             ok(`${rows.length} region rows; ${p0fRows.length} hold p0f units (p0f_count > 0)`);
-            if (p0fRows[0]) {
-                const r = p0fRows[0];
-                note(`p0f buy example: tariff for carrier ${r.carrier_id}, body {"region_id":"${r.region_id}","require":["p0f"]}`);
+            // A complete buy body: a tariff on that carrier with p0f stock, plus the region.
+            for (const r of p0fRows) {
+                const t = tariffs.body.data
+                    .filter((x) => String(x.carrier_id) === String(r.carrier_id) && (x.features?.p0f?.count ?? 0) > 0)
+                    .sort((a, b) => a.price - b.price)[0];
+                if (!t) continue;
+                note(`p0f buy example ("${t.name}"): body ${JSON.stringify({ tariff_id: t._id, modemCount: 1, region_id: r.region_id, require: ['p0f'], max_total_usd: t.price })}`);
+                break;
             }
         } else {
             bad('a /free-modems row lacks an integer p0f_count between 0 and count');
@@ -111,7 +136,8 @@ async function main() {
 
     if (!KEY) {
         console.log('\n  CORONIUM_API_KEY is not set: the public checks above ran, the account checks did not.\n');
-        console.log('  Get your key at https://dashboard.coronium.io → Your Account → API Access, then:');
+        console.log('  Get your key at https://dashboard.coronium.io → Your Account → API Access, then either');
+        console.log('  put it in examples/nextjs-dashboard/.env (Node 20.12+), or run:');
         console.log('    CORONIUM_API_KEY=eyJ... node examples/verify-integration.mjs\n');
         process.exit(1);
     }
@@ -123,7 +149,9 @@ async function main() {
         ok(`key accepted${account.body?.login ? ` - ${account.body.login}` : ''}`);
     } else {
         bad(`key rejected - ${describeError(account)}`);
-        note('Copy a fresh JWT from dashboard.coronium.io → Your Account → API Access.');
+        if (account.status === 401 && account.body?.code === 'auth_required') {
+            note('Copy a fresh JWT from dashboard.coronium.io → Your Account → API Access.');
+        }
     }
 
     // 4. Spending power - a valid key with an empty balance still cannot buy.
@@ -191,8 +219,12 @@ async function main() {
         ok(`registered: ${url.origin}${url.pathname}`);
         if (RUN_WEBHOOK_TEST) {
             const test = await call('/account/webhook/test', { method: 'POST' });
-            if (test.status === 200) {
-                ok(`test event delivered - ${JSON.stringify(test.body)}`);
+            // The route answers 200 whether or not your endpoint accepted the event:
+            // the outcome is body.delivered.
+            if (test.status === 200 && test.body?.delivered === true) {
+                ok(`test event accepted - status_code=${test.body.status_code} latency_ms=${test.body.latency_ms ?? '?'}`);
+            } else if (test.status === 200) {
+                bad(`test event not accepted - status_code=${test.body?.status_code ?? 'none'} ${test.body?.error || test.body?.hint || ''}`);
             } else {
                 bad(`test event failed - ${describeError(test)}`);
             }
@@ -200,8 +232,10 @@ async function main() {
             note('Re-run with --webhook-test to fire a real signed event at it.');
         }
     } else {
-        bad('no webhook_url registered - you will not be told when a modem dies');
-        note("PUT /account/webhook with {\"webhook_url\":\"https://your-host/...\"} (HTTPS, public).");
+        const msg = 'no webhook_url registered - you will not be told when a modem dies';
+        if (REQUIRE_WEBHOOK) bad(msg); else warn(`${msg} (fine before deploy)`);
+        note("After deploy: PUT /account/webhook with {\"webhook_url\":\"https://your-host/...\"} (HTTPS, public),");
+        note('or npm run register-webhook in examples/nextjs-dashboard. Then re-run with --require-webhook --webhook-test.');
     }
 
     console.log(

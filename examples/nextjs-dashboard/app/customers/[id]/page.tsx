@@ -46,7 +46,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
 
             <section className="card mt-6">
                 <h2 className="text-sm font-medium mb-3 text-zinc-400 uppercase tracking-wide">
-                    {proxies.length} active proxy{proxies.length === 1 ? '' : 'ies'}
+                    {proxies.length} active {proxies.length === 1 ? 'proxy' : 'proxies'}
                 </h2>
                 {proxies.length === 0 ? (
                     <p className="text-zinc-500 text-sm">

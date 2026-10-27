@@ -11,11 +11,14 @@ Stamp it when you buy. Send it **pre-stringified** - the column is a string serv
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
 {
-  "tariff_id": "61ef075c5a33f238ac15a8e7",
+  "tariff_id": "<tariff _id from GET /api/v3/tariffs/available>",
   "modemCount": 1,
+  "max_total_usd": 97,
   "metadata": "{\"customer_id\":\"acme-007\",\"tag\":\"tiktok-batch\",\"internal_invoice\":\"INV-2026-04-1213\"}"
 }
 ```
+
+`max_total_usd` is the total the buyer approved (tariff `price` x `modemCount`). If the price moved above it, the answer is `409 price_changed` and nothing was charged.
 
 Read it back:
 
@@ -41,7 +44,7 @@ Note: `metadata` comes back as a JSON string, not a parsed object. JSON-parse it
 If you stored "modem 69b5… belongs to acme-007" only in your own database, you'd need to keep it in sync across:
 
 - Renewals (creates a new payment row, but modem_id stays - you don't strictly need to update, but easy to mishandle)
-- Refunds (modem deleted on Coronium side - your table would have a dangling row)
+- Removals (a line leaves your account on the Coronium side - your table would have a dangling row)
 - Manual admin actions on Coronium side
 
 With `metadata`, the truth for those cases lives on the modem record itself and `GET /account/proxies` alone tells you who owns what.

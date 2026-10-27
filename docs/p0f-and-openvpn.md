@@ -60,13 +60,14 @@ curl -X POST https://api.coronium.io/api/v3/payment/buy-with-account-credit \
   -H "Idempotency-Key: $(uuidgen)" \
   -d '{"tariff_id":"<tariff with features.p0f.count > 0>","modemCount":1,
        "region_id":"<region with p0f_count > 0>","require":["p0f"],
+       "max_total_usd":<tariff price x modemCount>,
        "metadata":"{\"customer_id\":\"acme-007\"}"}'
 ```
 
 ```js
 // examples/nextjs-dashboard/lib/coronium.ts
 await coronium.payment.buy(
-  { tariff_id, modemCount: 1, region_id, require: ['p0f'], metadata: { customer_id } },
+  { tariff_id, modemCount: 1, region_id, require: ['p0f'], max_total_usd: price, metadata: { customer_id } },
   'account_credit', idempotencyKey);
 ```
 
@@ -135,6 +136,24 @@ curl -X PUT https://api.coronium.io/api/v3/modems/<modem_id>/set-os \
   -d '{"os":"<a value from options>"}'
 ```
 
+`set-os` answers:
+
+- `200` - applied. The body has `data.applied: true`, or `data.noop: true` when the line
+  already had that value (no change was needed). Treat both as success.
+- `202` with `data.pending: true` (plus `request_id`, `vocabulary` and `change`) - sent to the
+  line and not yet confirmed. Do not resend: a resend answers `409 p0f_change_in_progress`.
+  Read `p0f_os` on `GET /account/proxies` (or `current` on `p0f-options`) later. It changes
+  only after the line confirms.
+
+An optional `request_id` (UUIDv4) in the body makes a retry safe: the same id returns the same
+answer.
+
+```json
+HTTP 202
+{ "result": "ok", "data": { "applied": false, "pending": true, "request_id": "...",
+  "vocabulary": "os_profile", "change": { "...": "..." } } }
+```
+
 `set-os` refusals. Nothing is changed in any of them:
 
 | Status | `code` | Meaning |
@@ -144,6 +163,14 @@ curl -X PUT https://api.coronium.io/api/v3/modems/<modem_id>/set-os \
 | 429 | generic | One change per 5 minutes per proxy. Wait `Retry-After` |
 | 502 | `p0f_not_applied` | The change could not be applied or the line's state could not be read. Retry in a minute |
 | 404 | `p0f_unavailable` | OS changes are not available on this line right now. Contact support |
+| 400 | `p0f_os_not_supported_on_server` | Some lines: the value is not accepted; the body carries `allowed`. Treat it like `p0f_os_unsupported_on_this_server` |
+| 429 | `p0f_rate_limited` | Some lines: one change per 5 minutes |
+| 409 | `p0f_change_in_progress` | A change is already waiting for the line to confirm. Do not resend |
+| 409 | `p0f_proxy_offline` | The line is not connected. Retry later |
+| 409 | `rental_conflict` | The rental is no longer on this account. Reload the proxy list |
+| 400 | `invalid_request` | `request_id` is not a UUIDv4 |
+
+Branch on the HTTP status first.
 
 ## 4. Replacing a p0f line
 
@@ -215,7 +242,11 @@ const profile = await coronium.proxies.openvpn(modemId);
 Coronium Node rows (top-level `provider: "coronium_node"`) differ: the profile
 **downloads once**. Store the file. A second download, a lost download or a password change
 answers `409 vpn_revoke_required`; call `POST /modems/{id}/openvpn/revoke` (no body), then
-download again. `409 vpn_not_ready` means OpenVPN is not available on that rental yet.
+download again. The revoke is idempotent: repeat it while it answers `409 vpn_revoke_pending`
+until it answers `cleanupConfirmed: true`. On the download, `409 vpn_not_ready` with
+`suggested_action` `retry_later` means wait and retry; with `check_capabilities` it means the
+line has no OpenVPN right now. On the revoke, `409 vpn_not_ready` means the rental changed or
+there is no profile to revoke: reload the proxy list.
 
 ## 6. Error envelope
 

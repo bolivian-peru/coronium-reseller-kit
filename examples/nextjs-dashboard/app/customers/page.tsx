@@ -1,6 +1,7 @@
 import { customers } from '@/lib/customers';
 import Link from 'next/link';
 import { CustomerForm } from './customer-form';
+import { DeleteButton } from './delete-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,16 +50,5 @@ export default function CustomersPage() {
                 )}
             </section>
         </main>
-    );
-}
-
-function DeleteButton({ id }: { id: string }) {
-    // Server component renders a form that POSTs to DELETE /api/customers?id=…
-    // For brevity we keep it as a plain HTML form with a hidden _method override.
-    // Real apps: use a client component with confirm() prompt.
-    return (
-        <form action={`/api/customers?id=${encodeURIComponent(id)}`} method="DELETE" onSubmit={() => undefined}>
-            <button className="btn-danger text-xs" type="submit" formMethod="DELETE">Delete</button>
-        </form>
     );
 }

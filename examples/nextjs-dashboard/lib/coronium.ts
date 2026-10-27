@@ -149,13 +149,20 @@ export interface ReplaceResult {
     oldModemId: string;
     /** Equals oldModemId when the line was moved instead of swapped. */
     newModemId: string;
+    /**
+     * true when the line was moved instead of swapped: same id, login, password
+     * and expiry, only the ports may change. Your own replace that moves the
+     * line and keeps the same ports sends no modem.replaced event, so this
+     * answer is the source of truth.
+     */
+    moved?: boolean;
     newModem: {
         _id: string; name: string; country_code: string | null; carrier_id: string | null;
         host: string | null; http_port: string; socks_port: string;
         proxy_login: string; proxy_password: string; tariff_expired_at: number; isOnline: boolean;
-        /** @deprecated carries `_id`; removed 2026-11-19. */
+        /** @deprecated removed 2026-11-19. Not an id you can use on every path; ignore it. */
         IMEI?: string;
-        /** @deprecated carries `_id`; removed 2026-11-19. */
+        /** @deprecated removed 2026-11-19. Not an id you can use on every path; ignore it. */
         portId?: string;
     };
     /** Only for a p0f line. `kept: false` only after allow_without_p0f. */
@@ -178,8 +185,37 @@ export interface RotationStatus {
     state: 'idle' | 'rotating' | 'done' | 'failed';
     ext_ip?: string | null;
     rotated_at?: number | null;
+    /**
+     * 'device did not confirm the outcome' on a failed rotation means the line is
+     * under review: /restart answers 409 until support resolves it. Ignore the
+     * "retry after 2 minutes" hint in that case.
+     */
+    reset_error?: string | null;
     hint?: string | null;
     [field: string]: unknown;
+}
+
+/** Answer of PUT /modems/{id}/set-os (200 applied or noop, or 202 pending). */
+export interface SetOsResult {
+    result: 'ok';
+    data: {
+        modemId: string;
+        /** The OS value now on the line (empty = pass-through). */
+        p0f_os?: string;
+        /** Coronium Node rows: the value you asked for. */
+        requested_os?: string;
+        /** true at 200 when the line already had this value: success, nothing changed. */
+        noop?: boolean;
+        /** true once the line runs the new OS. */
+        applied?: boolean;
+        /** true on a 202: sent, not yet confirmed. Do not resend. */
+        pending?: boolean;
+        request_id?: string;
+        vocabulary?: 'os_profile' | 'tcp_stack' | null;
+        change?: unknown;
+        next_change_in_seconds?: number;
+        [field: string]: unknown;
+    };
 }
 
 export interface Endpoint { host: string; port: number | string; username: string; password: string }
@@ -259,6 +295,19 @@ export interface BuyResult {
     };
 }
 
+// /account/proxies/health is not real-time (most lines refresh every 30 minutes
+// server-side), so serve one answer for 60 s to every page instead of calling
+// it on each render. A failed call is not cached.
+const HEALTH_TTL_MS = 60_000;
+let healthMemo: { at: number; promise: Promise<HealthResponse> } | null = null;
+function cachedHealth(): Promise<HealthResponse> {
+    if (healthMemo && Date.now() - healthMemo.at < HEALTH_TTL_MS) return healthMemo.promise;
+    const memo = { at: Date.now(), promise: call<HealthResponse>('/account/proxies/health') };
+    memo.promise.catch(() => { if (healthMemo === memo) healthMemo = null; });
+    healthMemo = memo;
+    return memo.promise;
+}
+
 // ─── API surface ─────────────────────────────────────────────────────────
 export const coronium = {
     account: {
@@ -266,7 +315,8 @@ export const coronium = {
     },
     proxies: {
         list: () => call<{ data: Proxy[] }>('/account/proxies'),
-        health: () => call<HealthResponse>('/account/proxies/health'),
+        /** Cached for 60 s in this process: poll it at most once a minute. */
+        health: () => cachedHealth(),
         /**
          * Rotate a modem's IP. This call is SYNCHRONOUS - it holds the request
          * open until the carrier has actually handed out a new IP, then tells
@@ -283,9 +333,41 @@ export const coronium = {
          * A row with `proxyEndpoints` answers 202 at once with
          * `{ rotated: false, pending: true }`: poll rotationStatus() every
          * 5-10 s until `done` or `failed`. Never resubmit while pending.
+         *
+         * Refusals change nothing:
+         * - 429 (`rotation_too_soon` / `rotation_cooldown`, classic rows and
+         *   rows with proxyEndpoints that are not Coronium Node rows): wait
+         *   err.retry_after_seconds (Retry-After), then try again once.
+         * - 409 modem_expired (renew_first): renew the line; do not retry.
+         * - 409 rotate_unavailable + check_proxy_health: the line is offline; do not loop.
+         * - 502 rotation_unconfirmed: the rotation was submitted; poll
+         *   rotationStatus(), do not resend.
+         * - 409 on a Coronium Node row: read err.code and err.suggested_action.
+         *   - First check the message. If err.message contains 'no confirmed
+         *     outcome', the line is under review. Stop rotating and contact
+         *     support with err.request_id. Retrying never clears it, whatever
+         *     suggested_action says.
+         *   - modem_rotation_in_progress: poll rotationStatus().
+         *   - rotate_unavailable + retry_after_2_minutes: retry once after 120 s.
+         *     This refusal has no Retry-After, so err.retry_after_seconds is undefined.
+         *   - rotate_unavailable + check_capabilities: the line cannot rotate now; do not loop.
+         *   - rental_conflict: reload the proxy list.
+         * - 503 on a Coronium Node row (code modem_rotation_in_progress, error
+         *   'Rotation unavailable'): rotation is unavailable right now. Do not
+         *   poll rotationStatus(); try later.
+         * - rotationStatus(): state 'failed' with reset_error 'device did not
+         *   confirm the outcome' is the review case above, not "retry after 2 minutes".
+         *
+         * `requestId` (UUIDv4): generate it with crypto.randomUUID() once per user
+         * action and reuse it on network retries, so a retry replays the recorded
+         * command instead of issuing a second one. Only rows with proxyEndpoints
+         * read it; classic rows ignore it.
          */
-        rotate: (id: string) =>
-            call<RotateResult>(`/modems/${id}/restart`, { method: 'POST' }),
+        rotate: (id: string, requestId?: string) =>
+            call<RotateResult>(`/modems/${encodeURIComponent(id)}/restart`, {
+                method: 'POST',
+                body: JSON.stringify(requestId ? { request_id: requestId } : {}),
+            }),
         rotationStatus: (id: string) =>
             call<RotationStatus>(`/modems/${id}/rotation-status`),
         /**
@@ -293,7 +375,24 @@ export const coronium = {
          * A p0f line is replaced only by a p0f line; with none available this
          * throws 409 `p0f_replacement_unavailable` and nothing changes. Pass
          * `allow_without_p0f: true` only after your buyer agreed to lose p0f.
-         * Key on `newModem._id` (IMEI/portId are deprecated aliases of it).
+         * Key on `newModemId`; ignore newModem.IMEI / portId (deprecated). A
+         * `moved: true` answer kept the same id: refetch the line for its ports.
+         *
+         * Other failures, all with nothing changed:
+         * - 400 "No free modems!" (envelope code internal_error, not no_stock):
+         *   no replacement in stock now. Retry later, don't loop.
+         * - 400 "Your replacements count ran out for today!": daily limit.
+         * - 500 "Replacement failed ... Your current proxy is unchanged.": no line
+         *   arrived in time and the order was closed; no second line appears later.
+         * - 409 request_in_progress: another action on this line is running.
+         * - Some lines cannot be replaced through the API and answer 409: either
+         *   code action_unsupported (check proxyEndpoints.capabilities.replace
+         *   first when proxyEndpoints is present), or code internal_error and an
+         *   error that says to contact support. Do not retry these; open a ticket.
+         * - 409 "This proxy is being moved right now": a move of this line is
+         *   running. Refetch the line in a few minutes; do not resend in parallel.
+         * - 500 "The replacement needs a check by support": nothing charged. Do
+         *   not retry; open a ticket with err.request_id.
          */
         replace: (id: string, opts: { allow_without_p0f?: boolean } = {}) =>
             call<ReplaceResult>(`/modems/${id}/replace`, {
@@ -306,12 +405,23 @@ export const coronium = {
                 `/modems/${id}/p0f-options`
             ),
         /**
-         * Set the OS fingerprint ('' turns it off). Refusals change nothing:
-         * 400 p0f_unsupported_on_server, 400 p0f_os_unsupported_on_this_server
-         * (body.allowed), 429 one change per 5 minutes, 502 p0f_not_applied (retry in a minute).
+         * Set the OS fingerprint ('' turns it off).
+         * 200 = applied (data.applied: true, or data.noop: true when the line already
+         * had that value). 202 with data.pending: true = sent
+         * to the line and not yet confirmed: do NOT resend (that answers 409
+         * p0f_change_in_progress); read p0f_os on proxies.list() later. Pass the
+         * same `requestId` (UUIDv4) on a network retry to get the same answer.
+         * Refusals change nothing: 400 p0f_unsupported_on_server,
+         * 400 p0f_os_unsupported_on_this_server or p0f_os_not_supported_on_server
+         * (body.allowed), 429 one change per 5 minutes, 502 p0f_not_applied
+         * (retry in a minute), 404 p0f_unavailable (contact support),
+         * 409 p0f_proxy_offline (retry later), 409 rental_conflict.
          */
-        setOs: (id: string, os: string) =>
-            call<any>(`/modems/${id}/set-os`, { method: 'PUT', body: JSON.stringify({ os }) }),
+        setOs: (id: string, os: string, requestId?: string) =>
+            call<SetOsResult>(`/modems/${encodeURIComponent(id)}/set-os`, {
+                method: 'PUT',
+                body: JSON.stringify(requestId ? { os, request_id: requestId } : { os }),
+            }),
         /**
          * Download the line's .ovpn profile (text). Check `features.openvpn.available`
          * on the line first: when it is false the call refuses.
@@ -321,6 +431,13 @@ export const coronium = {
          * the SAME line. Never replace it for this - a new line starts a new wait.
          * Stop (do not retry) on 409 `openvpn_not_supported` and 400
          * `openvpn_disabled`. 502 `openvpn_unavailable` is worth one later retry.
+         * Coronium Node lines download their profile once. After it is
+         * downloaded or the password changes, this call answers 409
+         * `vpn_revoke_required`. Call revokeOpenvpn(), repeating it while it
+         * answers 409 `vpn_revoke_pending`, then download again. 409
+         * `vpn_not_ready` with suggested_action `retry_later` means wait and
+         * retry; with `check_capabilities` it means this line has no OpenVPN
+         * right now.
          */
         openvpn: async (id: string, { maxAttempts = 4 } = {}): Promise<string> => {
             for (let attempt = 1; ; attempt++) {
@@ -342,12 +459,26 @@ export const coronium = {
             }
         },
         /**
+         * Coronium Node lines only: revoke the download-once OpenVPN profile so a new one can be downloaded.
+         * Idempotent: on 409 `vpn_revoke_pending` send the same request again until it answers cleanupConfirmed: true.
+         * 409 `vpn_not_ready` here means the rental changed or no profile can be revoked: refresh the proxy list.
+         * Other line types answer 409 and nothing changes.
+         */
+        revokeOpenvpn: (id: string) =>
+            call<{ result: 'ok'; cleanupConfirmed: true }>(`/modems/${encodeURIComponent(id)}/openvpn/revoke`, { method: 'POST' }),
+        /**
          * Auto-rotate every N SECONDS. Minimum 60; 0 disables. Sending minutes
          * here (e.g. 5 meaning "5 minutes") is rejected with a 400 - anything
-         * between 1 and 59 is invalid.
+         * between 1 and 59 is invalid. On a line whose
+         * proxyEndpoints.capabilities.rotationInterval is false, the call answers
+         * 409 action_unsupported and changes nothing. Use rotate() for on-demand
+         * rotation instead. Rows with proxyEndpoints take whole minutes only (a
+         * multiple of 60, max 2592000; 90 is a 400), answer 409 when the device
+         * is offline and 502 when the change is not confirmed (refresh before
+         * retrying), and return {result, applied: true, data: {_id, rotation_interval}}.
          */
         setRotationInterval: (id: string, seconds: number) =>
-            call<{ result: string; data: { _id: string; name: string; rotation_interval: number } }>(
+            call<{ result: string; applied?: boolean; data: { _id: string; name?: string; rotation_interval: number } }>(
                 `/modems/${id}/set-rotation-interval`,
                 { method: 'PUT', body: JSON.stringify({ rotation_interval: seconds }) }
             ),
@@ -390,6 +521,12 @@ export const coronium = {
                  * Any other value: 400 `unknown_requirement` (`supported: ["p0f"]`).
                  */
                 require?: Array<'p0f'>;
+                /**
+                 * The most the buyer approved, in USD. If the server's total is
+                 * higher the API answers 409 `price_changed` with a fresh `quote`
+                 * and charges nothing: show it and ask again.
+                 */
+                max_total_usd?: number;
             },
             lane: 'account_credit' | 'crypto_btc',
             idempotencyKey: string
@@ -407,6 +544,7 @@ export const coronium = {
                     // Coupons apply on both balance lanes. The charged price
                     // is whatever `billing.charged_usd` says - never compute it.
                     ...(args.coupon ? { coupon: { coupon_name: args.coupon } } : {}),
+                    ...(args.max_total_usd != null ? { max_total_usd: args.max_total_usd } : {}),
                 }),
                 headers: { 'Idempotency-Key': idempotencyKey },
             }),
@@ -414,12 +552,30 @@ export const coronium = {
             call<{ currency: 'USD'; total_usd: number; total_cents: number; line_items: any[] }>('/payment/renewal-quote', {
                 method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }], ...couponBody(coupon) }),
             }),
-        /** Pass the same coupon you quoted with, or the charge will differ from the quote. */
-        renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string, coupon?: string) =>
+        /**
+         * Pass the same coupon you quoted with, or the charge will differ from the quote.
+         * `maxTotalUsd` binds the charge to the approved quote: above it the API
+         * answers 409 `price_changed` with a fresh `quote` and charges nothing.
+         * Other refusals: 400 insufficient_balance, 409 renewal_already_pending
+         * (already paid, still applying: do not retry), 429 renewal_burst (wait
+         * 10 minutes), 409 duplicate_request (read `reason`; keep the same key).
+         */
+        renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string, coupon?: string, maxTotalUsd?: number) =>
             call<BuyResult>(lane === 'account_credit' ? '/payment/renew-with-account-credit' : '/payment/renew-modems-with-crypto-balance', {
-                method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }], ...couponBody(coupon) }),
+                method: 'POST', body: JSON.stringify({
+                    modems: [{ modem_id: modemId, days }], ...couponBody(coupon),
+                    ...(maxTotalUsd != null ? { max_total_usd: maxTotalUsd } : {}),
+                }),
                 headers: { 'Idempotency-Key': idempotencyKey },
             }),
+    },
+    payments: {
+        /**
+         * Follow one payment, for example after a 503 PAYMENT_DELIVERY_UNCONFIRMED
+         * or a 500 that carried `paymentId`: the balance was charged, so check
+         * this before starting a new order.
+         */
+        status: (id: string) => call<any>(`/payments/${encodeURIComponent(id)}/status`),
     },
     webhook: {
         get: () => call<{ webhook_url: string | null }>('/account/webhook'),

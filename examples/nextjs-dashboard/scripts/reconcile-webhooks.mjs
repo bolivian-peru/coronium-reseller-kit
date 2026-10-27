@@ -1,3 +1,11 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Plain Node does not read .env (next start does). Load it here; variables
+// already set in the environment win over the file.
+const envFile = fileURLToPath(new URL('../.env', import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
+
 const user = process.env.RESELLER_ADMIN_USER;
 const password = process.env.RESELLER_ADMIN_PASSWORD;
 const base = process.env.RESELLER_INTERNAL_URL || 'http://127.0.0.1:3000';
