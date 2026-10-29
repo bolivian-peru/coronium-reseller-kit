@@ -4,6 +4,23 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.10.29 - raw OpenAPI spec, funding and coupons explained
+
+Docs only. No example code changed, and the API answers you already handle are the same.
+
+- The spec is now served raw at <https://api.coronium.io/openapi.json> (and `/openapi.yaml`),
+  version 3.3.6. 3.3.6 is a docs release: every operation has an `operationId`, and the
+  payment error codes the routes already return are now written down. PROMPT.md, AGENTS.md
+  and llms.txt point at the raw spec; the Swagger UI at `/api-docs/` is unchanged.
+- PROMPT.md and llms.txt now say how funding works today. The API spends a balance you
+  already hold and cannot add money: account credit is topped up by a person in the
+  dashboard, BTC is sent by hand to the deposit address from `GET /account/crypto-balance`.
+  USDT held at Coronium is not spent by the API purchase routes. Keep "do not automate
+  funding" in your prompts.
+- llms.txt explains coupons on API purchases: the `coupon: {coupon_name}` body field,
+  checking a code first with `POST /coupons/check`, and why the discounted total belongs in
+  `max_total_usd` (a code that no longer applies is priced at list price instead of failing).
+
 ## 2026.10.27 - synced with OpenAPI 3.3.5, checked against the live API
 
 - Examples: next 16.3.6 -> 16.4.3 (security advisory), npm audit fix in nextjs-dashboard and webhook-receiver; both report 0 vulnerabilities.

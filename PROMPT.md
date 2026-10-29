@@ -17,7 +17,7 @@ proxies with these features (skip any I don't list):
 - API-only integration instructions: Bearer authentication, account balances,
   tariff stock with X-Coronium-Proxy-Credentials: separate-protocol-v1 on stock
   and purchase calls, renewal quote, renewal, separate HTTP/SOCKS5 endpoints,
-  idempotency, and the raw Swagger reference at https://dashboard.coronium.io/api-docs/
+  idempotency, and the raw OpenAPI spec at https://api.coronium.io/openapi.json
 
 My CORONIUM_API_KEY is in .env. Deploy target: a self-hosted persistent volume.
 Use Next.js App Router, TypeScript, Tailwind, operator authentication, and a
@@ -31,7 +31,7 @@ integration checks. Ask me before a live purchase that spends my balance.
 
 ```
 Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
-and https://dashboard.coronium.io/api-docs/. Build a Node CLI directly against
+and https://api.coronium.io/openapi.json. Build a Node CLI directly against
 the REST API using Bearer auth and server-side secrets. It should list tariffs,
 show account credit and BTC separately, buy with a stable Idempotency-Key,
 quote and renew an owned modem, and display separate HTTP/SOCKS5 endpoints
@@ -78,6 +78,23 @@ GET /account/proxies for the current connection details, re-stamp metadata on th
 new modem, notify my customer through my own channel, and handle modem.dead
 reasons including no_p0f_stock.
 ```
+
+## How funding works today
+
+The API spends money that is already on your Coronium account. It has no route to
+add money, so your agent cannot fund anything and should not try. You top up by hand:
+
+- **Account credit (USD).** Add it in the dashboard at <https://dashboard.coronium.io>.
+  Buys spend it through `POST /payment/buy-with-account-credit`.
+- **BTC.** `GET /account/crypto-balance` returns an array; the entry with `coin: "btc"`
+  holds your deposit address and your BTC balance. Send BTC there from your own wallet.
+  Buys spend it through `POST /payment/buy-modems-with-crypto-balance`, which converts
+  the USD total to BTC at order time. Larger orders wait until the deposit is mined.
+- **USDT** held at Coronium is not spent by the API purchase routes.
+
+Refunds always go back to your Coronium balance. Keep "do not automate funding" in
+every prompt you give an agent until the API has a top-up route of its own. To check
+everything end to end, buy one line on the 24-hour plan.
 
 ## After Claude finishes
 

@@ -15,7 +15,7 @@ You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G
 3. `docs/webhook-integration.md` - the auto-swap event flow
 4. `docs/metadata-strategy.md` - metadata plus the durable local mapping needed for swaps
 5. `docs/p0f-and-openvpn.md` - p0f stock per region, `require: ["p0f"]` on buy, OpenVPN download answers
-6. Coronium reseller API - authoritative interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required). Kit synced with OpenAPI 3.3.5; see `CHANGELOG.md`
+6. Coronium reseller API - authoritative raw OpenAPI spec: <https://api.coronium.io/openapi.json> (also `/openapi.yaml`; Swagger UI at <https://api.coronium.io/api-docs/>; public, no login required). Kit checked against OpenAPI 3.3.6; see `CHANGELOG.md`
 
 ## The minimum-viable reseller dashboard has six features
 
