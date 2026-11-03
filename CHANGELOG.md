@@ -6,16 +6,16 @@ the kit was checked against. "Breaking" means an answer you may already handle c
 
 ## 2026.11.03 - crypto to account credit, agent sign-up, saved cards, MCP pointer
 
-Kit version 2026.11.03, checked against OpenAPI 3.3.11. Docs only: no example code changed,
+Kit version 2026.11.03, checked against OpenAPI 3.3.11 (live from 3 Nov 2026). Docs only: no example code changed,
 and the API answers you already handle are the same. Everything below is additive.
 
 - **USDT is now usable through the API.** `POST /api/v3/account/balance/convert` moves the
-  account's own confirmed USDT and/or BTC into USD account credit at the live rate, one way.
+  account's own confirmed USDT and/or BTC into USD account credit, one way (BTC at the live rate, USDT 1:1).
   Body `{coin: "usdt", "btc" or "all" (default), amount_usd (number of at least 1, single coin
   only), dry_run: true to preview}`. A real move needs an `Idempotency-Key` header
-  (`[A-Za-z0-9_-]{8,128}`). `200` `data` = `{moved: [{coin, coin_amount, usd, rate, move_id,
+  (`[A-Za-z0-9_-]{8,128}`, the same check as the buy routes; `.`, `:` or more than 128 characters is `400`). `200` `data` = `{moved: [{coin, coin_amount, usd, rate, move_id,
   status, replay}], refused, account_credit_before, account_credit_after}`; `409` when nothing
-  moved (`nothing_to_move` under $1, or per-coin `refused` codes such as
+  moved (`nothing_to_move` under $1 with `coin: "all"`, or per-coin `refused` codes such as
   `AWAITING_CONFIRMATION` or `PENDING_CRYPTO_ORDER`). The 2026.10.29 lines "USDT held at
   Coronium is not spent by the API purchase routes" and "there is no top-up API" are
   replaced in README.md, AGENTS.md, llms.txt, PROMPT.md and docs/reseller-quickstart.md.
@@ -30,7 +30,7 @@ and the API answers you already handle are the same. Everything below is additiv
   New README section: "Accounts and funding without a browser".
 - **Saved cards** are documented next to the balance lanes: `GET /account/card-list`,
   `POST /payment/buy-with-card/{card_id}`, `POST /payment/renew-with-card/{card_id}`. A person
-  adds the card in the dashboard; the API cannot add one. These routes never answer
+  adds the card in the dashboard. These routes never answer
   `429 payment_in_progress`, the same cart in the same five-minute window is not charged twice even with
   a new `Idempotency-Key`, and a declined card answers `402` with nothing charged.
 - **MCP pointer.** README.md, llms.txt and the quickstart point at

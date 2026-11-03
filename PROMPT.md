@@ -56,7 +56,7 @@ I fund my Coronium balance myself, as account credit (dashboard) or USDT
 (TRC-20) or BTC sent to the deposit addresses from GET /account/crypto-balance.
 Once a deposit confirms, POST /account/balance/convert moves it into account
 credit: preview with dry_run: true, and do the real move only after my yes, with
-an Idempotency-Key. Before each buy, read GET /account and use
+an Idempotency-Key (8-128 letters, digits, - or _). Before each buy, read GET /account and use
 buy-with-account-credit (accountCredit) or buy-modems-with-crypto-balance (BTC
 only). Buy only after I approve the quoted
 total, and send that approved total as max_total_usd on the buy (and the
@@ -93,14 +93,14 @@ crypto into account credit:
 - **USDT (TRC-20) and BTC.** `GET /account/crypto-balance` returns an array; the entries
   with `coin: "usdt"` and `coin: "btc"` hold your deposit addresses and balances. Send
   from your own wallet. Once the deposit confirms, `POST /account/balance/convert` moves
-  it into USD account credit at the live rate, one way: `{"coin":"all","dry_run":true}`
-  previews, and the same body without `dry_run` plus an `Idempotency-Key` header does
-  the move. A BTC balance can also pay directly through
+  it into USD account credit, one way (BTC at the live rate, USDT 1:1): `{"coin":"all","dry_run":true}`
+  previews, and the same body without `dry_run` plus an `Idempotency-Key` header (8-128 letters, digits, `-` or `_`)
+  does the move. A BTC balance can also pay directly through
   `POST /payment/buy-modems-with-crypto-balance`, which converts the USD total to BTC at
   order time. Larger orders wait until the deposit is mined.
 - **Saved card.** Add the card in the dashboard. Then `GET /account/card-list` and
   `POST /payment/buy-with-card/{card_id}` (or `/payment/renew-with-card/{card_id}`)
-  pay with it. The API cannot add a card.
+  pay with it. A person adds the card in the dashboard.
 
 No account yet? An agent can create one through the API (`POST /signup`, `POST /get-token`,
 then `GET https://api.coronium.io/api/v1/account/api-token`); see the README section
