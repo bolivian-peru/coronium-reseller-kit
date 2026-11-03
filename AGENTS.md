@@ -16,7 +16,7 @@ You are scaffolding a **proxy reseller business**. The user resells mobile 4G/5G
 4. `docs/metadata-strategy.md` - metadata plus the durable local mapping needed for swaps
 5. `docs/p0f-and-openvpn.md` - p0f stock per region, `require: ["p0f"]` on buy, OpenVPN download answers
 6. Coronium reseller API - authoritative raw OpenAPI spec: <https://api.coronium.io/openapi.json> (also `/openapi.yaml`; Swagger UI at <https://api.coronium.io/api-docs/>; public, no login required). Kit checked against OpenAPI 3.3.11 (live from 3 Nov 2026); see `CHANGELOG.md`
-7. No account or key yet? The README section "Accounts and funding without a browser" shows how an agent signs up, gets the 365-day API key and moves its own USDT or BTC into account credit, by REST or with `coronium-proxy-mcp@2.4.2`
+7. No account or key yet? The README section "Accounts and funding without a browser" shows how an agent signs up, gets the 365-day API key and moves its own USDT or BTC into account credit, by REST or with `coronium-proxy-mcp@2.4.3`
 
 ## The minimum-viable reseller dashboard has six features
 
