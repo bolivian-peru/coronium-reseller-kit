@@ -15,7 +15,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 5. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> - working foundation
 6. <https://api.coronium.io/openapi.json> - authoritative raw OpenAPI spec (3.3.11, live from 3 Nov 2026, public, also as `/openapi.yaml`); the same spec as Swagger UI at <https://api.coronium.io/api-docs/>
 7. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/CHANGELOG.md> - dated API and kit changes, breaking vs additive
-8. <https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser> - the MCP server (`npx -y coronium-proxy-mcp@2.4.2`; hosted `https://api.coronium.io/mcp`, 22 tools, never spends, and `https://api.coronium.io/mcp/buyer`, 15 tools, 20 when purchases are allowed) and the no-browser sign-up and funding walk-through
+8. <https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser> - the MCP server (`npx -y coronium-proxy-mcp@2.4.3`; hosted `https://api.coronium.io/mcp`, 22 tools, never spends, and `https://api.coronium.io/mcp/buyer`, 15 tools, 20 when purchases are allowed) and the no-browser sign-up and funding walk-through
 
 ## API endpoints you'll use
 
