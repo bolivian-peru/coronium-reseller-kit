@@ -11,6 +11,7 @@ You (the LLM agent) are scaffolding a proxy reseller business for someone. They 
 1. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md> - your instructions
 2. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/PROMPT.md> - the prompts the human will paste
 3. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/billing-and-reconciliation.md> - charged amount, coupon before/after, carrier, webhook receipt
+4. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/feature-badges.md> - IPv6, p0f and OpenVPN badges: which field, when to show, what a buy can guarantee
 4. <https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/docs/p0f-and-openvpn.md> - p0f stock per region, `require: ["p0f"]`, OpenVPN download answers
 5. <https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard> - working foundation
 6. <https://api.coronium.io/openapi.json> - authoritative raw OpenAPI spec (3.3.11, live from 3 Nov 2026, public, also as `/openapi.yaml`); the same spec as Swagger UI at <https://api.coronium.io/api-docs/>
