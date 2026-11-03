@@ -44,6 +44,7 @@ ask me before any paid test purchase.
 | `examples/webhook-receiver/` | Durable signed event receiver for resellers with their own CRM worker |
 | `docs/reseller-quickstart.md` | Zero → revenue path, 7 steps |
 | `docs/webhook-integration.md` | Auto-swap event flow contract |
+| `docs/feature-badges.md` | Show IPv6, OS fingerprint (p0f) and OpenVPN badges on plan cards, region pickers and customer lines, from live API fields |
 | `docs/p0f-and-openvpn.md` | Find p0f stock per region, buy with `require: ["p0f"]`, set the OS, replacements that keep p0f, OpenVPN download answers |
 | `docs/stock-and-credentials.md` | Optional credential header, line types, Coronium Node rows, capabilities |
 | `CHANGELOG.md` | Dated list of API and kit changes, breaking vs additive |
