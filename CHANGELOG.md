@@ -4,6 +4,42 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.03 - crypto to account credit, agent sign-up, saved cards, MCP pointer
+
+Kit version 2026.11.03, checked against OpenAPI 3.3.11 (live from 3 Nov 2026). Docs only: no example code changed,
+and the API answers you already handle are the same. Everything below is additive.
+
+- **USDT is now usable through the API.** `POST /api/v3/account/balance/convert` moves the
+  account's own confirmed USDT and/or BTC into USD account credit, one way (BTC at the live rate, USDT 1:1).
+  Body `{coin: "usdt", "btc" or "all" (default), amount_usd (number of at least 1, single coin
+  only), dry_run: true to preview}`. A real move needs an `Idempotency-Key` header
+  (`[A-Za-z0-9_-]{8,128}`, the same check as the buy routes; `.`, `:` or more than 128 characters is `400`). `200` `data` = `{moved: [{coin, coin_amount, usd, rate, move_id,
+  status, replay}], refused, account_credit_before, account_credit_after}`; `409` when nothing
+  moved (`nothing_to_move` under $1 with `coin: "all"`, or per-coin `refused` codes such as
+  `AWAITING_CONFIRMATION` or `PENDING_CRYPTO_ORDER`). The 2026.10.29 lines "USDT held at
+  Coronium is not spent by the API purchase routes" and "there is no top-up API" are
+  replaced in README.md, AGENTS.md, llms.txt, PROMPT.md and docs/reseller-quickstart.md.
+  The API cannot send anything from your own wallet, so a deposit is always a person's
+  on-chain send: keep "never send funds on-chain" in your prompts, and ask the person before
+  a purchase or a conversion.
+- **Agents can open their own account.** `POST /api/v3/signup` `{login, password, name,
+  purpose?}`, `POST /api/v3/get-token` `{login, password}`, then
+  `GET https://api.coronium.io/api/v1/account/api-token` with that session token as Bearer
+  returns the 365-day API key (`{token, expiresAt}`). Disposable and reserved email domains
+  are refused; the verification email does not block anything. The account starts empty.
+  New README section: "Accounts and funding without a browser".
+- **Saved cards** are documented next to the balance lanes: `GET /account/card-list`,
+  `POST /payment/buy-with-card/{card_id}`, `POST /payment/renew-with-card/{card_id}`. A person
+  adds the card in the dashboard. These routes never answer
+  `429 payment_in_progress`, the same cart in the same five-minute window is not charged twice even with
+  a new `Idempotency-Key`, and a declined card answers `402` with nothing charged.
+- **MCP pointer.** README.md, llms.txt and the quickstart point at
+  [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp) 2.4.2
+  (`npx -y coronium-proxy-mcp@2.4.2`): hosted `https://api.coronium.io/mcp` (22 tools, never
+  spends) and `https://api.coronium.io/mcp/buyer` (15 tools, 20 when purchases are allowed),
+  and `coronium_create_account` for a session with no token.
+- OpenAPI references now read 3.3.11 (README said 3.3.5, AGENTS.md and llms.txt 3.3.6).
+
 ## 2026.10.29 - raw OpenAPI spec, funding and coupons explained
 
 Docs only. No example code changed, and the API answers you already handle are the same.
