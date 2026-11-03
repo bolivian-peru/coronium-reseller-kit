@@ -12,6 +12,14 @@ Applies to the two balance lanes, which is what resellers use:
 | `POST /api/v3/payment/buy-modems-with-crypto-balance` | `crypto_btc` |
 | `POST /api/v3/payment/renew-modems-with-crypto-balance` | `crypto_btc` |
 
+Saved cards (`POST /payment/buy-with-card/{card_id}`, `POST /payment/renew-with-card/{card_id}`,
+cards listed by `GET /account/card-list` and added by a person in the dashboard) take the same
+`max_total_usd`. They never answer `429 payment_in_progress`, and the same cart within the same
+five-minute window is not charged twice, even with a new `Idempotency-Key`: the answer is the
+first order. A declined card, or one the bank wants authenticated, answers `402` and nothing is
+charged. To turn your own confirmed USDT or BTC into credit for the `account_credit` lane, use
+`POST /account/balance/convert` (README, "Accounts and funding without a browser").
+
 ---
 
 ## The 200 response
@@ -206,7 +214,7 @@ await renew({ modems: [{ modem_id, days: 30 }], max_total_usd: q.total_usd }, { 
 | Answer | Meaning | What to do |
 |---|---|---|
 | `409 price_changed` | The server total is above `max_total_usd`. Nothing was charged; `quote` (`total_usd`, `total_cents`, `line_items`) is the current price | Show `quote.total_usd`, ask again, send the new approval with a new `Idempotency-Key` |
-| `400 insufficient_balance` | Account credit is below the total (`reason_code` `INSUFFICIENT_CREDIT`, with `available_usd` and `required_usd`). Nothing was charged | Add funds in the dashboard, then retry |
+| `400 insufficient_balance` | Account credit is below the total (`reason_code` `INSUFFICIENT_CREDIT`, with `available_usd` and `required_usd`). Nothing was charged | Add funds in the dashboard, or move a confirmed USDT or BTC deposit into account credit with `POST /account/balance/convert` (after the operator's yes), then retry |
 | `401 "Insufficient crypto balance"` (BTC lane, `code` `internal_error`) | The BTC balance is below the total; `required` and `available` are in BTC. Nothing was charged. Your API key is fine | Fund the BTC balance or use the account-credit lane. Do not regenerate the key |
 | `409 duplicate_request` | `new_order_created: false`. `reason`: `idempotency_key_conflict` (key reused with a different body), `recent_identical_request` (same request without a key within 180 s, `Retry-After`), `request_in_progress`, `request_outcome_unknown`, `legacy_request_identity_unknown` | Do not switch to a new key to get past it. Check `GET /account/payments` and `GET /account/proxies` first |
 | `409 renewal_already_pending` (account-credit renewal) | A renewal for that line was already paid and is still being applied (`payment_id`). Nothing was charged | Do not retry; follow `GET /payments/{payment_id}/status` |

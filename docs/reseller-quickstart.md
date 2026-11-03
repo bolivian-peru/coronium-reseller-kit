@@ -4,11 +4,13 @@ The shortest possible path from zero to a working reseller business.
 
 ## 1. Sign up at Coronium
 
-<https://dashboard.coronium.io> - create an account, verify email, fund your balance in the dashboard (account credit) or with BTC to the deposit address from `GET /account/crypto-balance`. The API purchase routes spend account credit or BTC; USDT held at Coronium is not spent by them. There is no top-up API. The balance is what you pay Coronium when you buy proxies on customers' behalf.
+<https://dashboard.coronium.io> - create an account, verify email, fund your balance in the dashboard (account credit), or send USDT (TRC-20) or BTC to the deposit addresses from `GET /account/crypto-balance`. Once a deposit confirms, `POST /account/balance/convert` moves it into USD account credit, one way (`{"coin":"all","dry_run":true}` previews; the real move needs an `Idempotency-Key` header). The API purchase routes spend account credit or BTC, and a card you saved in the dashboard pays through `POST /payment/buy-with-card/{card_id}` (the API cannot add a card). The balance is what you pay Coronium when you buy proxies on customers' behalf.
+
+No browser? An agent can open the account itself: `POST /api/v3/signup` `{login, password, name, purpose?}`, then `POST /api/v3/get-token` `{login, password}`, then `GET https://api.coronium.io/api/v1/account/api-token` with that session token as Bearer, which returns the 365-day API key (`{token, expiresAt}`). Disposable and reserved email domains are refused. A verification email is sent; nothing waits for it. The account starts empty: no balance, no proxies, nothing included until paid. The same steps exist as MCP tools in [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser) 2.4.2 (`coronium_create_account`, `coronium_convert_crypto_to_credit`).
 
 ## 2. Get your API key
 
-Dashboard → Your Account → API Access. Copy the JWT. This is your reseller identity for every API call.
+Dashboard → Your Account → API Access. Copy the JWT (or use the key from `GET /api/v1/account/api-token` above; it is the same key). This is your reseller identity for every API call.
 
 Confirm it works before building anything:
 

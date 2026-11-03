@@ -12,7 +12,9 @@ If you're an AI agent scaffolding a reseller dashboard, **read these first** in 
 4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) - working foundation, copy and modify
 5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) - the auto-swap event flow
 
-Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required). This kit is synced with OpenAPI **3.3.5** and was checked against the live API on 27 Oct 2026. What changed: [CHANGELOG.md](./CHANGELOG.md).
+Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required; raw spec at <https://api.coronium.io/openapi.json>). This kit is synced with OpenAPI **3.3.11** (3 Nov 2026: account sign-up, crypto to account credit and saved cards added); the proxy and webhook behaviour was checked against the live API on 27 Oct 2026. What changed: [CHANGELOG.md](./CHANGELOG.md).
+
+Prefer MCP? [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp) runs the same API as tools: `npx -y coronium-proxy-mcp@2.4.2` locally, or the hosted servers `https://api.coronium.io/mcp` (22 tools, never spends) and `https://api.coronium.io/mcp/buyer` (15 tools, 20 when purchases are allowed). See [Accounts and funding without a browser](#accounts-and-funding-without-a-browser).
 
 ## For humans
 
@@ -82,7 +84,26 @@ ask me before any paid test purchase.
 | `POST /api/v3/account/webhook/secret/rotate` | Create or rotate your own signing secret (shown once) |
 | `POST /api/v3/account/webhook/test` | Fire a real signed test event and get the delivery result |
 
-Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Your Account → API Access. `POST /get-token` and `POST /signup` never reveal whether an account exists: an unknown address and a wrong password both answer `401 Invalid email or password.`, and sign-up answers `200 {"result":"ok"}` for every valid address.
+Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Your Account → API Access, or let an agent create the account and the key through the API ([below](#accounts-and-funding-without-a-browser)). `POST /get-token` and `POST /signup` never reveal whether an account exists: an unknown address and a wrong password both answer `401 Invalid email or password.`, and sign-up answers `200 {"result":"ok"}` for every valid address.
+
+### Accounts and funding without a browser
+
+An agent can open the account, fund it and buy with no dashboard visit. The account starts empty: no balance, no proxies, nothing included until paid. Every purchase still needs the person's yes for the exact total.
+
+| Method · Path | Purpose |
+|---|---|
+| `POST /api/v3/signup` | `{login, password, name, purpose?}`. Disposable and reserved email domains are refused. A verification email is sent; nothing waits for it |
+| `POST /api/v3/get-token` | `{login, password}` → a session token |
+| `GET https://api.coronium.io/api/v1/account/api-token` | With the session token as Bearer: `{token, expiresAt}`, the 365-day API key (the same key as Dashboard → Account → API Access) |
+| `GET /api/v3/account/crypto-balance` | USDT (TRC-20) and BTC deposit addresses and balances, plus account credit. An array: `coin` is `btc`, `usdt` or `account_credit`. The first call creates missing deposit wallets |
+| `POST /api/v3/account/balance/convert` | Moves the account's own confirmed USDT and/or BTC into USD account credit at the live rate, one way. Body `{coin, amount_usd?, dry_run?}`: `coin` is `usdt`, `btc` or `all` (default `all`), `amount_usd` a number of at least 1 (single coin only), `dry_run: true` previews. A real move needs an `Idempotency-Key` header (8-128 letters, digits, `_` or `-`; a UUID works). `200` `data` = `{moved: [{coin, coin_amount, usd, rate, move_id, status, replay}], refused, account_credit_before, account_credit_after}`. A coin that cannot move now (BTC not yet confirmed, an open crypto order) is listed in `refused` with its `code`; when nothing moved the status is `409`, and less than $1 to move is `409 nothing_to_move` |
+| `GET /api/v3/account/card-list` | Saved cards. A person adds a card in the dashboard (Stripe); the API cannot add one |
+| `POST /api/v3/payment/buy-with-card/{card_id}` | Buy with a saved card, same body as the balance buys (`max_total_usd`, `Idempotency-Key`). A declined card, or one the bank wants authenticated, answers `402` and nothing is charged |
+| `POST /api/v3/payment/renew-with-card/{card_id}` | Renew with a saved card; quote first with `POST /payment/renewal-quote` |
+
+Then buy with `POST /api/v3/payment/buy-with-account-credit` (or renew with `/payment/renew-with-account-credit`), sending `max_total_usd` and an `Idempotency-Key`. A `202` means paid and provisioning: poll `GET /api/v3/payments/{paymentId}/status`, do not order again. A confirmed BTC balance can also pay directly on `/payment/buy-modems-with-crypto-balance` and `/payment/renew-modems-with-crypto-balance`. Refunds go to the Coronium account balance. The paid 24-hour plan is the way to test a line.
+
+The same flow as MCP tools: start `npx -y coronium-proxy-mcp@2.4.2` with no `CORONIUM_API_TOKEN` and `CORONIUM_TOOL_PROFILE=buyer` (plus `CORONIUM_ENABLE_SPENDING=1` to buy). `coronium_create_account` signs up, signs in and issues the API key for the session, then `coronium_get_crypto_balance`, `coronium_convert_crypto_to_credit` (dry run, then confirmed), `coronium_quote_purchase` and `coronium_buy_modems_with_balance` with `funding_source: "account_credit"`. Full walk-through with curl: [Agents without a browser](https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser).
 
 No header is needed to see stock. Without any header you are offered, and sold, units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses supplier consent, health checks or rental-term coverage, and an order with `autoRenew: true` is only filled from units that support it. `proxyEndpoints.provider` is an opaque label: never branch on it. The one documented value is `coronium_node` (Coronium Node rows, which also carry it as a top-level `provider`); see [stock and credentials](docs/stock-and-credentials.md#coronium-node-rows). Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (some line types do not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
 
@@ -200,7 +221,7 @@ Treat active proxies as customer-owned service. Check current ownership and capa
 2. **Use HTTPS for your webhook URL.** HTTP returns 400, and so does any private or non-resolving host.
 3. **Persist the signed webhook durably before acknowledging it within 5 seconds.** Non-2xx is retried; dedupe on `event_id` and process from a durable inbox.
 4. **Verify `X-Coronium-Signature`** over the raw request bytes before trusting a payload.
-5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice.
+5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice. A real `POST /account/balance/convert` move requires one in the same format.
 6. **Classic rotation is synchronous and answers 200 on failure.** Branch on `rotated`, not on the status code. Rows with `proxyEndpoints` answer 202 (poll rotation-status). A refusal is 409, 429 (wait `Retry-After`) or 502 `rotation_unconfirmed` (poll rotation-status, do not resend); read `code` and `suggested_action`.
 7. **`rotation_interval` is in SECONDS**, minimum 60, `0` disables. Passing minutes gets a 400.
 8. **Don't reinvent auto-swap or health logic.** Both are server-side, battle-tested.
