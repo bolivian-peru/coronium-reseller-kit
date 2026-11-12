@@ -174,7 +174,7 @@ async function main() {
         });
         note(`${tagged.length} carry a metadata.customer_id, ${list.length - tagged.length} are unattributed`);
         if (list.length > tagged.length) {
-            note('Re-stamp unattributed proxies with PUT /modems/{id}/set-metadata.');
+            note('Review unattributed proxies against purchase receipts and current ownership before any set-metadata repair; never overwrite conflicting mappings or buy again.');
         }
         // OpenAPI 3.3.2+: features.p0f carries vocabulary (and 3.3.3 unavailable_reason), never provider.
         const p0fShapeBad = list.filter((p) => !p.features?.p0f || 'provider' in p.features.p0f

@@ -149,9 +149,9 @@ async function processEvent(body) {
             //    The line is in the same country, with the same remaining paid
             //    time - they don't lose anything, but the details may change.
             //
-            // 5) The replacement keeps your metadata. Re-stamping is a harmless
-            //    safety net for lines replaced before October 2026:
-            //      PUT /api/v3/modems/{data.new_modem_id}/set-metadata
+            // 5) The replacement keeps metadata. Do not re-stamp from a stale
+            //    event. Missing/conflicting metadata needs review against the
+            //    purchase receipt and current owned line before any repair.
             //
             // Do not rely on new_modem.IMEI / portId (deprecated, removed on
             // 2026-11-19). A replaced p0f line adds

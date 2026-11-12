@@ -20,11 +20,17 @@ export async function reconcileWebhooks() {
                 if (!data.old_modem_id || !data.new_modem_id) throw new Error('Replacement IDs missing');
                 const prior = assignments.get(data.old_modem_id) || assignments.get(data.new_modem_id);
                 if (!prior) throw new Error('Old modem has no customer mapping; operator review required');
-                // Coronium copies metadata onto the replacement; re-stamping is a
-                // harmless safety net for lines replaced before October 2026.
-                // Do the remote write first; if it fails, the event remains pending.
-                await coronium.proxies.setMetadata(data.new_modem_id, JSON.parse(prior.metadata));
-                assignments.replace(data.old_modem_id, data.new_modem_id, prior.customer_id, prior.metadata);
+                const current = (owned.data || []).find(proxy => proxy._id === data.new_modem_id);
+                if (!current || parseMetadata(current.metadata).customer_id !== prior.customer_id) {
+                    webhookEvents.mark(row.event_id, 'review', current
+                        ? 'Replacement metadata is missing or changed; verify the original receipt before repair'
+                        : 'Replacement is not in the current owned inventory; operator review required');
+                    needsReview++;
+                    continue;
+                }
+                // Keep current metadata, including edits made since the event. A
+                // webhook must never overwrite it with an older local snapshot.
+                assignments.replace(data.old_modem_id, data.new_modem_id, prior.customer_id, current.metadata!);
             }
             if (row.event === 'modem.dead' || row.event === 'proxy.purchase_failed') {
                 webhookEvents.mark(row.event_id, 'review', 'Customer service review required');
