@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
     let body: any = null;
     try { body = await req.json(); } catch {}
-    const { tariff_id, modemCount = 1, customer_id, tag, idempotency_key, lane = 'account_credit', need_p0f = false, max_total_usd } = body || {};
+    const { tariff_id, modemCount = 1, customer_id, tag, idempotency_key, lane = 'account_credit', need_p0f = false, max_total_usd, coupon } = body || {};
 
     if (!tariff_id || !customer_id) {
         return NextResponse.json(
@@ -21,8 +21,9 @@ export async function POST(req: NextRequest) {
         !['account_credit', 'crypto_btc'].includes(lane) ||
         typeof need_p0f !== 'boolean' ||
         (max_total_usd != null && (typeof max_total_usd !== 'number' || !Number.isFinite(max_total_usd) || max_total_usd <= 0)) ||
-        (tag != null && (typeof tag !== 'string' || tag.length > 128))) {
-        return NextResponse.json({ error: 'Invalid count, lane, tag, max_total_usd or idempotency key' }, { status: 400 });
+        (tag != null && (typeof tag !== 'string' || tag.length > 128)) ||
+        (coupon != null && (typeof coupon !== 'string' || !coupon.trim() || coupon.length > 64))) {
+        return NextResponse.json({ error: 'Invalid count, lane, tag, coupon, max_total_usd or idempotency key' }, { status: 400 });
     }
 
     // Confirm the customer exists in OUR local store before letting them buy.
@@ -35,6 +36,11 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+        // Validate a coupon once (cached in lib/coronium.ts): checks are rate
+        // limited, so never re-check the same code before every order.
+        if (coupon != null && !(await coronium.coupons.check(coupon)).valid) {
+            return NextResponse.json({ error: 'This coupon code is not valid for your account.' }, { status: 400 });
+        }
         const metadata = { customer_id, tag: tag || null };
         const result = await coronium.payment.buy(
             {
@@ -51,6 +57,8 @@ export async function POST(req: NextRequest) {
                 // Optional: the total the operator approved. Above it Coronium answers
                 // 409 price_changed with a fresh quote and charges nothing.
                 ...(max_total_usd != null ? { max_total_usd } : {}),
+                // Read billing.discount on the answer to confirm it applied.
+                ...(coupon != null ? { coupon: coupon.trim() } : {}),
             },
             lane,
             idempotency_key
@@ -79,12 +87,17 @@ export async function POST(req: NextRequest) {
             // is safe. Otherwise PAYMENT_DELIVERY_UNCONFIRMED (503) or a 500 with
             // paymentId means the balance was charged: pass it on so the operator
             // can follow the order with GET /payments/{id}/status.
+            // 400 not_a_modem_tariff: the tariff_id is not a dedicated-line plan.
+            // 429: pass Retry-After on so the operator waits before retrying.
             {
-                error: e.message, code: e.code, reason: e.body?.reason, suggested_action: e.suggested_action, request_id: e.request_id,
+                error: e.message, code: e.code, reason_code: e.reason_code, retry_after_seconds: e.retry_after_seconds, reason: e.body?.reason, suggested_action: e.suggested_action, request_id: e.request_id,
                 quote: e.body?.quote,
                 payment_id: e.body?.paymentId, charged_usd: e.body?.charged_usd, refunded: e.body?.refunded,
             },
-            { status: e.status || 500 }
+            {
+                status: e.status || 500,
+                headers: e.retry_after_seconds ? { 'Retry-After': String(e.retry_after_seconds) } : undefined,
+            }
         );
     }
 }

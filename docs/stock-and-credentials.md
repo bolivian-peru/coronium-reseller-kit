@@ -102,12 +102,12 @@ what to show from `capabilities`, not from the label.
   done, `needs_review: true` is under review (stop and contact support), any other `result`
   is failed.
 - `capabilities.http`, `socks5` and `udp` say which protocols passed qualification of this
-  exact device. `whitelist`, `usage` and `speedTest` enable `PUT /modems/{id}/set-white-list`,
-  `GET /modems/{id}/usage` and `/modems/{id}/speed-test`. On a line of any other type these
-  routes answer `404 not_found`.
-  - Whitelist: `{"white_list": [...]}` replaces the list, at most 10 entries, IPv4 `/24`-`/32`
-    or IPv6 `/48`-`/128`. Listed addresses connect without a password on `dedicated_port`
-    (returned in the answer); `[]` removes password-less access.
+  exact device. `usage` and `speedTest` enable `GET /modems/{id}/usage` and
+  `/modems/{id}/speed-test`. On a line of any other type these routes answer `404 not_found`.
+  - IP whitelisting is not available on any line sold today: every line connects with login
+    and password, and `capabilities.whitelist` is false. Integrations must feature-detect
+    that flag and hide any whitelist control while it is false; do not build a flow that
+    depends on `PUT /modems/{id}/set-white-list`.
   - Usage: `?days=1-366` (default 30) returns `totals` and per-UTC-day rows of the current
     rental only. `capabilities.usage` is false on every line today. A plan whose name ends
     in ` - 20 GB/month only` includes 20 GB of mobile data per month; show usage only when

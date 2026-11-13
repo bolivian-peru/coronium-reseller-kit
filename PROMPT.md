@@ -14,11 +14,14 @@ proxies with these features (skip any I don't list):
 - Signed webhook handler at /api/coronium/webhook: verify HMAC, persist by
   event_id, then ack 200. A durable worker reconciles replacements and flags
   modem.dead or purchase-failed events for operator review.
-- Health overview: poll /account/proxies/health at most every 60s (it is not real-time; most lines refresh every 30 min), highlight dead modems
+- Health overview: poll /account/proxies/health at most every 60s (it is not real-time; most lines refresh every 30 min), highlight lines whose health.state is down
 - API-only integration instructions: Bearer authentication, account balances,
   tariff stock with X-Coronium-Proxy-Credentials: separate-protocol-v1 on stock
   and purchase calls, renewal quote, renewal, separate HTTP/SOCKS5 endpoints,
   idempotency, and the raw OpenAPI spec at https://api.coronium.io/openapi.json
+- Error handling from the README "Limits and error answers" table: wait
+  Retry-After on every 429, treat 400 BAD_PARAMETERS as a request to fix,
+  validate a coupon once with POST /coupons/check (404 = not valid) and cache it
 
 My CORONIUM_API_KEY is in .env. Deploy target: a self-hosted persistent volume.
 Use Next.js App Router, TypeScript, Tailwind, operator authentication, and a
@@ -33,7 +36,8 @@ integration checks. Ask me before a live purchase that spends my balance.
 ```
 Read https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
 and https://api.coronium.io/openapi.json. Build a Node CLI directly against
-the REST API using Bearer auth and server-side secrets. It should list tariffs,
+the REST API using Bearer auth with my account API key (never a password
+sign-in loop) and server-side secrets. It should list tariffs,
 show account credit and BTC separately, buy with a stable Idempotency-Key,
 quote and renew an owned modem, and display separate HTTP/SOCKS5 endpoints
 separately. Store customer mappings durably. No dashboard is required.
@@ -108,7 +112,10 @@ crypto into account credit:
 
 No account yet? An agent can create one through the API (`POST /signup`, `POST /get-token`,
 then `GET https://api.coronium.io/api/v1/account/api-token`); see the README section
-"Accounts and funding without a browser". The account starts empty.
+"Accounts and funding without a browser". The account starts empty. Sign-ups are limited
+per IP address and per email domain, so create an account only when a person asks for one.
+After that, use only the API key: it needs no two-factor code and is not ended by a
+password change.
 
 Refunds always go back to your Coronium balance. Keep "never send funds on-chain" and
 "ask me before any purchase or conversion" in every prompt you give an agent. To check

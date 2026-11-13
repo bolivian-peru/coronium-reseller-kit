@@ -4,6 +4,64 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.13 - request limits, clearer error answers, measured health, pins
+
+Checked against OpenAPI 3.3.12 (live from 12 Nov 2026) and the live API on 13 Nov 2026.
+The limits and error answers below are live since 13 Nov 2026; the published spec does not
+describe all of them yet. Full table: README "Limits and error answers".
+
+- **Breaking: coupon check.** `POST /api/v3/coupons/check` answers `404` with one message
+  ("This coupon code is not valid for your account.") for an unknown, expired, revoked or
+  not-applicable code. Before, an expired or not-applicable code answered `400`. A valid
+  code still answers `200 {data: {discount}}`. `coupon_name` must be a string of at most
+  64 characters (`400` otherwise). Checks are limited to 120 per 10 minutes per account and
+  per IP address, and misses to 10 a day per account and 30 per network (`429` with
+  `Retry-After`). Validate a code once and cache it.
+- **Breaking: malformed input answers 400, not 500.** A malformed payment, ticket or pool id
+  in the path, a wrong-type value or invalid JSON answers `400` with `BAD_PARAMETERS` in
+  `code` or `reason_code`. A body or query key that starts with `$` answers `400`
+  `BAD_PARAMETERS`.
+- **Breaking: sign-in.** `POST /api/v3/get-token` on an account with two-factor login needs
+  the current code as `code` (`401` `two_factor_required` without it). Failed sign-ins are
+  limited per account and network (10 in 15 minutes) and per IP address (30 an hour), with
+  `429` and `Retry-After`. Login tokens end when the password or two-factor setting changes
+  or on "log out everywhere". Integrations should use the account API key, which needs no
+  code and is not ended by those changes. An API key never creates a dashboard session.
+  `/api/v1/create-token` is retired (`410`).
+- **Sign-up**: at most 5 accounts per IP address a day and 5 per uncommon email domain an
+  hour; reserved test domains (`.test`, `.example`, `.invalid`, `.localhost`) are refused.
+  `name` at most 80 characters, `company_name` 120, `purpose` 500; no `<` or `>` in `name`
+  or `company_name`. No kit example creates customer accounts; the agent sign-up flow in the
+  README is for the reseller's own account.
+- **Breaking: plans.** Line purchase routes accept only dedicated-line plans: a pool plan id
+  answers `400 not_a_modem_tariff`, nothing charged. Renewing a line whose plan is not a
+  dedicated-line plan answers `409 modem_tariff_invalid`. Country and carrier come from the plan.
+- **Webhook test**: `POST /account/webhook/test` never returns your endpoint's body:
+  `response_preview` is always `null`, and a failed delivery carries a short `error` plus
+  `error_code` (`invalid_url`, `refused_target`, `dns_failed`, `timeout`, `tls_error`,
+  `connection_failed`). Webhook URLs must be public `https://` hosts; redirects are not
+  followed (real deliveries included).
+- **Hosted MCP**: OAuth connections to `https://api.coronium.io/mcp` and `/mcp/buyer` end when
+  the account password or two-factor setting changes or on "log out everywhere".
+- **12 Nov 2026 (3.3.12), now in the kit**: `GET /account/proxies/health` rows carry
+  `health` (`state` `ok`, `degraded`, `down` or `unknown`, `checked_at`, `source`); automate
+  on `health.state`. `POST /modems/{id}/replace` on a proxy you already replaced answers
+  `409 already_replaced` with `current_modem` (was `404 modem_not_found`).
+- **Correction: IP whitelisting.** It is not available on any line sold today; every line uses
+  login and password and `capabilities.whitelist` is false. `docs/stock-and-credentials.md`
+  no longer describes a whitelist flow. Feature-detect the flag.
+- **Metadata (2026.11.12 entry)**: the backend fix behind it is live since 13 Nov 2026: on
+  the line types that could lose it before, purchase metadata is now written when the line
+  is assigned, and a delivery retry does not overwrite metadata edited after delivery.
+- `docs/feature-badges.md`: fields re-checked and unchanged; the example is now a live
+  mixed-stock plan ("on 17 of 35").
+- Examples: `lib/coronium.ts` adds `coupons.check` (cached; `404` and `400` read as not
+  valid), `err.reason_code`, `health.state` on health rows and a typed webhook test result.
+  `POST /api/coronium/buy` takes an optional `coupon`, validated once, and passes on
+  `reason_code` and `Retry-After`. `verify-integration.mjs` prints `reason_code`,
+  `Retry-After` on a `429` and the webhook test `error_code`.
+- Pins: OpenAPI 3.3.12; `coronium-proxy-mcp` 2.4.3 is still the current npm version.
+
 ## 2026.11.12 - metadata contract and safe reconciliation
 
 Documentation clarification against the metadata code contract and OpenAPI 3.3.11.
