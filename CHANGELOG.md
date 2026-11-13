@@ -4,6 +4,24 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.12 - metadata contract and safe reconciliation
+
+Documentation clarification against the metadata code contract and OpenAPI 3.3.11.
+This entry is not a production deployment receipt. No API request shape changed.
+
+- Buy and metadata-update requests accept an object or a string. Objects are
+  JSON-serialized; proxy lists return the stored string. Plain strings remain valid.
+- Keep a durable order/payment/modem-to-customer mapping. Missing metadata alone does
+  not prove failed delivery and must not trigger another purchase or payment replay.
+- Replacements retain metadata. Removed advice to re-stamp every replacement:
+  recover only a verified missing mapping on a currently owned modem, preserve the
+  complete value, stop on conflicting metadata, and verify the read-back.
+- Document that already-delivered retries preserve subsequent metadata edits and
+  that the setter replaces the whole field without a compare-and-set guard.
+- The dashboard example no longer writes remote metadata on replacement events.
+  It preserves current metadata and puts missing/conflicting mappings or an absent
+  owned replacement into review. Focused worker tests cover those cases.
+
 ## 2026.11.03 - crypto to account credit, agent sign-up, saved cards, MCP pointer
 
 Kit version 2026.11.03, checked against OpenAPI 3.3.11 (live from 3 Nov 2026). Docs only: no example code changed,

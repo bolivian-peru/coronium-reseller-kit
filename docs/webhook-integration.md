@@ -89,7 +89,7 @@ This POSTs a real signed `webhook.test` event to your registered URL **synchrono
 }
 ```
 
-`data.old_modem_id` and `data.new_modem_id` are always present. The replacement carries the remaining paid time **and** your `metadata`. Re-stamping via `PUT /modems/{new_modem_id}/set-metadata` is harmless. See [`metadata-strategy.md`](./metadata-strategy.md).
+`data.old_modem_id` and `data.new_modem_id` are always present. The replacement carries the remaining paid time **and** your `metadata`. Do not re-stamp unconditionally: a stale event can overwrite later edits. Verify missing metadata against the original receipt and current owned row; stop on a conflicting mapping. See [`metadata-strategy.md`](./metadata-strategy.md).
 
 The `new_modem` block comes in one of two shapes:
 
@@ -272,9 +272,9 @@ async function process(evt) {
         // Update mapping atomically - single write, single source of truth.
         await updateCustomer(customer.id, creds);
 
-        // The replacement keeps your metadata; re-stamping is a harmless safety
-        // net for lines replaced before October 2026.
-        await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
+        // The replacement keeps metadata. Do not overwrite later edits from
+        // this event. Missing/conflicting metadata needs receipt-based review
+        // against the current owned row (see metadata-strategy.md).
 
         // Notify the customer with the current connection details.
         await emailNewCredentials(customer.email, creds);

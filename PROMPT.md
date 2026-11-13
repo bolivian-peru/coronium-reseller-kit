@@ -8,7 +8,8 @@ proxies with these features (skip any I don't list):
 
 - Customer list (CRUD on end-customers stored locally)
 - Buy proxies on a customer's behalf - pick country/carrier, attach customer_id
-  via the metadata field, show resulting credentials
+  via metadata (object or serialized JSON string), retain the order/payment/modem
+  mapping durably, and show resulting credentials after delivery is verified
 - Per-customer detail page with their proxies + health status + credential copy
 - Signed webhook handler at /api/coronium/webhook: verify HMAC, persist by
   event_id, then ack 200. A durable worker reconciles replacements and flags
@@ -76,9 +77,12 @@ X-Coronium-Signature over the raw body, persists the event keyed by event_id and
 acks 200 within 5 s (non-2xx only if storage fails). A separate idempotent worker
 then processes the inbox: map data.old_modem_id -> data.new_modem_id on my Stripe
 customer (store the modem _id, never the proxy password), refetch the line from
-GET /account/proxies for the current connection details, re-stamp metadata on the
-new modem, notify my customer through my own channel, and handle modem.dead
-reasons including no_p0f_stock.
+GET /account/proxies for the current connection details and metadata, notify my
+customer through my own channel, and handle modem.dead reasons including
+no_p0f_stock. Replacements keep metadata. If it is missing, verify the receipt
+and current ownership before any set-metadata repair; preserve all intended
+keys, stop on conflicting values, and read back the result. Never place a new
+order or replay an old payment merely because metadata is absent.
 ```
 
 ## How funding works today

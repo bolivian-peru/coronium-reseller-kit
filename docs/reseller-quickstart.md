@@ -96,7 +96,7 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
 The response contains the HTTP status your endpoint returned. With the Next.js example,
 `npm run register-webhook` does the register and test steps for you.
 
-Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, re-stamp metadata and notify the customer of changed credentials. Handle `modem.dead` and `proxy.purchase_failed` as service incidents.
+Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, verify the current metadata and notify the customer of changed credentials. Repair missing metadata only from a verified receipt/current ownership mapping; never overwrite a conflicting value. Handle `modem.dead` and `proxy.purchase_failed` as service incidents.
 
 ## 5. Buy your first proxy
 
@@ -118,7 +118,7 @@ curl -X POST https://api.coronium.io/api/v3/payment/buy-modems-with-crypto-balan
   }'
 ```
 
-It is `modemCount`, and `metadata` is a JSON string. Country and carrier come from the tariff. `max_total_usd` is the total the buyer approved (price x `modemCount`): a `409 price_changed` means the price moved above it and nothing was charged. Reuse that same `Idempotency-Key` if you retry, so a timeout can never charge you twice. This route spends the BTC balance: a `401 "Insufficient crypto balance"` means that balance is too low (fund it, or buy through `/payment/buy-with-account-credit` with the same body). It is not a key problem, so do not regenerate the key.
+It is `modemCount`. `metadata` accepts an object or a string; objects are JSON-serialized and proxy lists return the stored string. Country and carrier come from the tariff. `max_total_usd` is the total the buyer approved (price x `modemCount`): a `409 price_changed` means the price moved above it and nothing was charged. Reuse that same `Idempotency-Key` if you retry, so a timeout can never charge you twice. This route spends the BTC balance: a `401 "Insufficient crypto balance"` means that balance is too low (fund it, or buy through `/payment/buy-with-account-credit` with the same body). It is not a key problem, so do not regenerate the key.
 
 You get back `{result, charged_usd, currency, data:[{_id, http_port, socks_port, proxy_login, proxy_password, ext_ip, …}], billing}`. `data[0]` is your customer's proxy; `billing` itemizes what you were charged.
 
@@ -140,6 +140,6 @@ For end-customer auth, billing, and dashboard, you build that yourself on top of
      -H "Authorization: Bearer $CORONIUM_API_KEY"
    ```
    The response is `{"result":"ok","rotated":true,"ip":"…"}`. If `rotated` is `false` the IP did not change - the call still returns 200, so always read that field. A second rotation within 60 s answers `429` with `Retry-After`. A proxy with `proxyEndpoints` answers 202 `pending: true` instead: poll `GET /modems/$MODEM_ID/rotation-status` until `done` or `failed`. A `409` means the rotate was refused and nothing was queued: read `code` and `suggested_action`, and if `error` says the last rotation is under review, stop retrying and contact support.
-4. Where the provider supports auto-swap, a signed `modem.replaced` event names the replacement in `data.new_modem_id`. Refetch the line from `GET /account/proxies`, reconcile the mapping, re-stamp metadata and notify the customer. For providers without replacement capability, rely on health checks and your support workflow.
+4. Where the provider supports auto-swap, a signed `modem.replaced` event names the replacement in `data.new_modem_id`. Refetch the line from `GET /account/proxies`, reconcile the mapping and notify the customer. Replacements retain metadata; use the [metadata recovery procedure](metadata-strategy.md) if it is missing rather than unconditionally re-stamping it. For providers without replacement capability, rely on health checks and your support workflow.
 
 That's the whole flywheel.

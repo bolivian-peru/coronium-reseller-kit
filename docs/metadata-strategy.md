@@ -4,9 +4,9 @@ How to track which Coronium modem belongs to each end-customer, including after 
 
 ## The mechanism
 
-Every Modem record in Coronium has a freeform `metadata` field. It's a JSON string. **You control it.** Coronium stores it verbatim and returns it on every `/account/proxies` call.
+Every modem can carry optional `metadata` that maps it to your end-customer. Buy and update requests accept a JSON object or a string. Objects are JSON-serialized before storage; strings are preserved. `GET /account/proxies` returns the stored string, not a parsed object. A plain string need not contain JSON, so parse defensively.
 
-Stamp it when you buy. Send it **pre-stringified** - the column is a string server-side, so passing a bare object is not guaranteed to round-trip:
+Attach it when you buy. Both `{"customer_id":"acme-007"}` as an object and its serialized string are accepted. This example uses the string form:
 
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
@@ -37,28 +37,42 @@ GET /api/v3/account/proxies
 }
 ```
 
-Note: `metadata` comes back as a JSON string, not a parsed object. JSON-parse it on your side.
+Keep the same `Idempotency-Key` and exact body when retrying one purchase. Save its order/payment ID, returned modem IDs and complete intended metadata in your own durable store. An already-delivered retry must preserve edits made after delivery; it is not a way to restore the original metadata. An omitted, null or missing metadata value alone says nothing about whether the payment or delivery completed.
 
-## Why metadata remains the primary mapping
+## Keep a durable mapping alongside metadata
 
-If you stored "modem 69b5… belongs to acme-007" only in your own database, you'd need to keep it in sync across:
-
-- Renewals (creates a new payment row, but modem_id stays - you don't strictly need to update, but easy to mishandle)
-- Removals (a line leaves your account on the Coronium side - your table would have a dangling row)
-- Manual admin actions on Coronium side
-
-With `metadata`, the truth for those cases lives on the modem record itself and `GET /account/proxies` alone tells you who owns what.
+Metadata makes the current proxy row self-describing, but it is not your only receipt.
+Keep an order/payment/modem-to-customer index and a durable signed webhook inbox.
+A modem can leave your account before your worker processes its replacement event;
+metadata can also be edited or missing on an older line. Retain the original purchase
+receipt and complete metadata value for reconciliation.
 
 ## Replacements keep metadata
 
-Every replacement - automatic after a modem dies, your own `POST /modems/:id/replace`, or one by support - copies `metadata` and the remaining paid time onto the new proxy, also across chains (A → B → C). Lines replaced before October 2026 may have lost it, so re-stamping in your `modem.replaced` handler is still a cheap safety net:
+Replacements copy metadata and remaining paid time, including across chains (A → B → C).
+After a signed `modem.replaced` event, reconcile the old and new IDs from your durable
+index, then fetch `GET /account/proxies` for the current owned row and connection details.
+Do not automatically re-stamp the replacement: a later intentional edit could otherwise
+be overwritten. Backfill your local index from current proxy rows before starting an
+existing account's webhook worker.
 
-```ts
-// After you've updated your own record old_modem_id → new_modem_id:
-await coronium.proxies.setMetadata(data.new_modem_id, { customer_id: customer.id });
-```
+## Recover a missing mapping without buying again
 
-Also keep a **minimal durable** `old_modem_id → customer_id + metadata` index and a signed webhook inbox. Backfill the index from current proxy metadata before an existing account begins receiving swap events. Treat metadata as the primary self-describing mapping, and the index as recovery state when the old modem disappears before the event is processed.
+1. Match the purchase receipt or verified replacement chain to the exact modem ID and
+   your local end-customer record. An IP, port or device name is not enough.
+2. Fetch the current `GET /account/proxies` row and verify it is still in your account.
+   If it is gone, the receipt conflicts, or its metadata maps it to someone else, stop
+   for review. Do not edit a recycled line or guess the customer.
+3. If the mapping is confirmed missing, submit the complete intended metadata through
+   `PUT /modems/{id}/set-metadata`. Preserve all intended keys, not just `customer_id`.
+   This replaces the field and has no compare-and-set guard; serialize your own edits
+   and stop if you cannot establish the current value safely.
+4. After `200 {"result":"ok"}`, read the owned row again and verify the stored value.
+
+Missing metadata is not proof of a failed purchase. Reconcile the original payment
+status and delivered modem IDs; never place another order, invent a new idempotency
+key, or replay an old payment just to repair metadata. Existing missing values are
+not automatically backfilled by a fix to new purchases.
 
 ## What to put in metadata
 
@@ -98,9 +112,9 @@ For >1000 proxies the filter becomes noticeable. At that scale, build an in-memo
 
 ## Updating metadata after purchase
 
-`PUT /api/v3/modems/{id}/set-metadata` with `{"metadata": "<json string>"}` replaces it wholesale (there is no partial merge - send the complete object). It accepts a bare object too and stringifies it for you, but sending a string keeps buy and update paths identical.
+`PUT /api/v3/modems/{id}/set-metadata` with `{"metadata": "<json string>"}` or `{"metadata": {"customer_id": "acme-007"}}` replaces the entire field. There is no partial merge or compare-and-set guard. Send the complete intended value, then verify it through `GET /account/proxies`.
 
-You need this in two situations: reassigning a proxy to a different customer, and re-stamping a replacement after an auto-swap (see above).
+Use it for intentional mapping edits or the verified recovery procedure above. A replacement event alone is not a reason to write metadata again.
 
 ## Don't put end-customer auth in metadata
 
