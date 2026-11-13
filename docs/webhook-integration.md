@@ -44,7 +44,7 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
   -H "Authorization: Bearer $CORONIUM_API_KEY"
 ```
 
-This POSTs a real signed `webhook.test` event to your registered URL **synchronously** and returns the actual delivery outcome - the HTTP status your endpoint replied with, plus latency. Run it on every deploy. Without it, "we never get events" is indistinguishable from "our endpoint has been 500ing for a month".
+This POSTs a real signed `webhook.test` event to your registered URL **synchronously** and returns the delivery outcome: `delivered`, the HTTP `status_code` your endpoint replied with and `latency_ms`. On failure it adds a short `error` and an `error_code`: `invalid_url`, `refused_target` (not a public address), `dns_failed`, `timeout`, `tls_error` or `connection_failed`; a 3xx `status_code` means your endpoint redirected, which is not followed. Your endpoint's response body is never returned: `response_preview` is always `null` and stays only for older clients. Run it on every deploy. Without it, "we never get events" is indistinguishable from "our endpoint has been 500ing for a month".
 
 ## The envelope - every event has the same shape
 

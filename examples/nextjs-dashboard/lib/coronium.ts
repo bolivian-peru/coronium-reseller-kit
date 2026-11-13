@@ -49,9 +49,14 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
         const err: any = new Error(body?.error || `Coronium ${r.status}`);
         err.status = r.status;
         err.code = body?.code;
+        // The controller's own code when the envelope uses a generic one, e.g.
+        // code "invalid_request" with reason_code "BAD_PARAMETERS" (400: fix the
+        // request, do not retry it unchanged).
+        err.reason_code = body?.reason_code;
         err.suggested_action = body?.suggested_action;
         err.retryable = body?.retryable;
         // A 503/429 may say when to come back (e.g. openvpn_profile_pending: 120 s).
+        // Every 429 carries Retry-After: wait at least that long, never retry sooner.
         const retryAfter = Number(r.headers.get('retry-after'));
         err.retry_after_seconds = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined;
         err.request_id = body?.request_id || r.headers.get('x-request-id');
@@ -233,6 +238,16 @@ export interface HealthRow {
     tariff_expired_at: number | null;
     recommendation: 'use' | 'skip_for_now' | 'contact_support';
     hint: string | null;
+    /**
+     * Measured state from real checks of the line (12 Nov 2026). Automate on
+     * `health.state`; `status` and `recommendation` are the older fields.
+     * `unknown` = nothing measured in the last 2 hours.
+     */
+    health?: {
+        state: 'ok' | 'degraded' | 'down' | 'unknown';
+        checked_at: string | null;
+        source: 'probe' | 'live_test' | 'device' | null;
+    };
 }
 
 export interface HealthResponse {
@@ -308,8 +323,47 @@ function cachedHealth(): Promise<HealthResponse> {
     return memo.promise;
 }
 
+// POST /coupons/check is limited (120 checks per 10 minutes per account and per
+// IP address; 10 misses a day per account), so check a code once and reuse the
+// answer instead of re-checking before every order. A valid code is cached for
+// an hour, a "not valid" answer for a day. Errors (429, 5xx) are not cached.
+export type CouponCheck = { valid: true; discount: string | number } | { valid: false };
+const COUPON_VALID_TTL_MS = 60 * 60_000;
+const COUPON_INVALID_TTL_MS = 24 * 60 * 60_000;
+const couponMemo = new Map<string, { until: number; result: CouponCheck }>();
+
+async function checkCoupon(code: string): Promise<CouponCheck> {
+    const name = code.trim();
+    if (!name || name.length > 64) return { valid: false };
+    const hit = couponMemo.get(name);
+    if (hit && hit.until > Date.now()) return hit.result;
+    let result: CouponCheck;
+    try {
+        const r = await call<{ data: { discount: string | number } }>('/coupons/check', {
+            method: 'POST', body: JSON.stringify({ coupon_name: name }),
+        });
+        result = { valid: true, discount: r.data?.discount ?? 0 };
+    } catch (e: any) {
+        // 404 = unknown, expired, revoked or not for this account (one answer
+        // for all four; the envelope code is generic, so branch on the status).
+        // 400 = coupon_name missing, empty or not a string.
+        if (e.status !== 404 && e.status !== 400) throw e;
+        result = { valid: false };
+    }
+    couponMemo.set(name, { until: Date.now() + (result.valid ? COUPON_VALID_TTL_MS : COUPON_INVALID_TTL_MS), result });
+    return result;
+}
+
 // ─── API surface ─────────────────────────────────────────────────────────
 export const coronium = {
+    coupons: {
+        /**
+         * Validate a coupon code, cached (see checkCoupon). `discount` is a
+         * percentage string such as "15%"; 0 means this account already used it.
+         * The charged price is still whatever `billing.charged_usd` says.
+         */
+        check: checkCoupon,
+    },
     account: {
         get: () => call<any>('/account'),
     },
@@ -502,7 +556,9 @@ export const coronium = {
     payment: {
         /**
          * Buy `modemCount` proxies on the tariff. Country and carrier come from
-         * the TARIFF - sending them in the body does nothing.
+         * the TARIFF - a body country_id or carrier_id does not override them.
+         * Only dedicated-line plans are accepted: a pool plan id answers
+         * 400 `not_a_modem_tariff` and nothing is charged.
          *
          * `idempotencyKey` must be ONE stable key per buy intent, reused across
          * every retry of that intent. Replaying it within 24h returns the
@@ -558,7 +614,9 @@ export const coronium = {
          * answers 409 `price_changed` with a fresh `quote` and charges nothing.
          * Other refusals: 400 insufficient_balance, 409 renewal_already_pending
          * (already paid, still applying: do not retry), 429 renewal_burst (wait
-         * 10 minutes), 409 duplicate_request (read `reason`; keep the same key).
+         * 10 minutes), 409 duplicate_request (read `reason`; keep the same key),
+         * 409 modem_tariff_invalid (the line's plan is not a dedicated-line plan:
+         * contact support).
          */
         renew: (modemId: string, days: number, lane: 'account_credit' | 'crypto_btc', idempotencyKey: string, coupon?: string, maxTotalUsd?: number) =>
             call<BuyResult>(lane === 'account_credit' ? '/payment/renew-with-account-credit' : '/payment/renew-modems-with-crypto-balance', {
@@ -586,12 +644,29 @@ export const coronium = {
             }),
         /**
          * Fire a real `webhook.test` POST at your registered URL and return the
-         * actual delivery result (status code + latency). Use this instead of
-         * waiting for a modem to die to find out your endpoint is misconfigured.
+         * delivery result. Use this instead of waiting for a modem to die to
+         * find out your endpoint is misconfigured. The route answers 200 either
+         * way: read `delivered`. Your endpoint's body is never returned.
          */
-        test: () => call<any>('/account/webhook/test', { method: 'POST' }),
+        test: () => call<WebhookTestResult>('/account/webhook/test', { method: 'POST' }),
     },
 };
+
+export interface WebhookTestResult {
+    delivered: boolean;
+    url: string;
+    event_id: string;
+    /** Your endpoint's HTTP status; a 3xx means it redirected (not followed). */
+    status_code: number | null;
+    latency_ms: number;
+    /** Short human text when not delivered, else null. */
+    error: string | null;
+    error_code: 'invalid_url' | 'refused_target' | 'dns_failed' | 'timeout' | 'tls_error' | 'connection_failed' | null;
+    /** Always null: kept for older clients. */
+    response_preview: null;
+    signed: boolean;
+    hint: string;
+}
 
 // ─── Metadata helper ──────────────────────────────────────────────────────
 // `metadata` comes back as a JSON string. Parse defensively: it is freeform

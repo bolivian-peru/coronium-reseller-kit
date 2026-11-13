@@ -41,6 +41,8 @@ Before enabling webhooks for an existing reseller account, run the worker once w
 
 The buy page shows an estimated tariff price; Coronium's `billing` response is the actual charge. The renewal UI fetches `POST /payment/renewal-quote` and requires a fresh confirmed price before charging. It does not turn on recurring auto-renew. Both payment lanes send an `Idempotency-Key` and keep the same key after a timeout or ambiguous response. Check Coronium's account and payment state before creating a new intent after an uncertain result.
 
+`POST /api/coronium/buy` also takes an optional `coupon`. The route validates it once through `coronium.coupons.check` (`lib/coronium.ts`), which caches the answer because Coronium limits coupon checks: an unknown, expired, revoked or not-applicable code answers `404` there and the route refuses the order with `400`. Errors pass on `code`, `reason_code` (for example `BAD_PARAMETERS`) and, on a `429`, the `Retry-After` value to wait.
+
 `X-Coronium-Proxy-Credentials: separate-protocol-v1` also offers this client units with separate HTTP/SOCKS5 logins. For those proxies, `proxyEndpoints.http` and `.socks5` can carry different hosts and credentials; the customer page displays each separately. The legacy credential fields are HTTP compatibility fields and must not be reused for SOCKS5.
 
 Do not use this sample as a public customer login. Add tenant authentication, retail billing, notifications, and a durable shared database before offering it to end-customers.

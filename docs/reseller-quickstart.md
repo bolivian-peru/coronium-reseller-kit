@@ -6,7 +6,7 @@ The shortest possible path from zero to a working reseller business.
 
 <https://dashboard.coronium.io> - create an account, verify email, fund your balance in the dashboard (account credit), or send USDT (TRC-20) or BTC to the deposit addresses from `GET /account/crypto-balance`. Once a deposit confirms, `POST /account/balance/convert` moves it into USD account credit, one way (`{"coin":"all","dry_run":true}` previews; the real move needs an `Idempotency-Key` header of 8-128 letters, digits, `-` or `_`). The API purchase routes spend account credit or BTC, and a card you saved in the dashboard pays through `POST /payment/buy-with-card/{card_id}` (a person adds the card in the dashboard). The balance is what you pay Coronium when you buy proxies on customers' behalf.
 
-No browser? An agent can open the account itself: `POST /api/v3/signup` `{login, password, name, purpose?}`, then `POST /api/v3/get-token` `{login, password}`, then `GET https://api.coronium.io/api/v1/account/api-token` with that session token as Bearer, which returns the 365-day API key (`{token, expiresAt}`). Disposable and reserved email domains are refused. A verification email is sent; nothing waits for it. The account starts empty: no balance, no proxies, nothing included until paid. The same steps exist as MCP tools in [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser) 2.4.3 (`coronium_create_account`, `coronium_convert_crypto_to_credit`).
+No browser? An agent can open the account itself: `POST /api/v3/signup` `{login, password, name, purpose?}`, then `POST /api/v3/get-token` `{login, password}` (plus `code` on a two-factor account), then `GET https://api.coronium.io/api/v1/account/api-token` with that session token as Bearer, which returns the 365-day API key (`{token, expiresAt}`). Disposable and reserved email domains are refused, and sign-ups are limited per IP address and per email domain. Use only the API key after that: it needs no two-factor code and is not ended by a password change. A verification email is sent; nothing waits for it. The account starts empty: no balance, no proxies, nothing included until paid. The same steps exist as MCP tools in [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp#agents-without-a-browser) 2.4.3 (`coronium_create_account`, `coronium_convert_crypto_to_credit`).
 
 ## 2. Get your API key
 
@@ -96,7 +96,7 @@ curl -X POST https://api.coronium.io/api/v3/account/webhook/test \
 The response contains the HTTP status your endpoint returned. With the Next.js example,
 `npm run register-webhook` does the register and test steps for you.
 
-Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, verify the current metadata and notify the customer of changed credentials. Repair missing metadata only from a verified receipt/current ownership mapping; never overwrite a conflicting value. Handle `modem.dead` and `proxy.purchase_failed` as service incidents.
+Coronium POSTs a signed `modem.replaced` event when a supported auto-swap succeeds. Persist it before acknowledging, update your CRM, verify the current metadata and notify the customer of changed credentials. Repair missing metadata only from a verified receipt/current ownership mapping; never overwrite a conflicting value. Handle `modem.dead` and `proxy.purchase_failed` as service problems that need operator review.
 
 ## 5. Buy your first proxy
 

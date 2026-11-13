@@ -24,6 +24,8 @@ charged. To turn your own confirmed USDT or BTC into credit for the `account_cre
 
 ## The 200 response
 
+Amounts below are illustrative. Current prices come from `GET /api/v3/tariffs/available`.
+
 ```jsonc
 {
   "result": "ok",
@@ -113,6 +115,16 @@ ignored coupons; if you built against that, re-test.) A missing or expired code 
 not necessarily fail the order: it can go through at list price with `discount: null`. So
 validate the code up front with `POST /api/v3/coupons/check`, quote before you charge, and
 always confirm from `billing.discount` that it was applied before you book your margin.
+
+`POST /api/v3/coupons/check` takes `{"coupon_name": "<code>"}` (a string of at most 64
+characters, otherwise `400`). A usable code answers `200 {"data": {"discount": "15%"}}`
+(`discount: 0` = this account already used it). An unknown, expired, revoked or
+not-applicable code answers `404` with one message, "This coupon code is not valid for your
+account."; branch on the status, not on `code`. Checks are limited to 120 per 10 minutes
+per account and per IP address, and misses to 10 a day per account and 30 per network;
+beyond that the answer is `429` with `Retry-After`. Validate a code once when the operator
+enters it, cache the result, and send it with each order instead of re-checking before
+every purchase.
 
 Any account-specific reseller discount is delivered as a coupon code. Prices returned by
 `/tariffs/available` are list prices and never include it, so the discount cannot be applied

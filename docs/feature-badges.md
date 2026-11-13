@@ -2,7 +2,7 @@
 
 How to show "IPv6", "OS fingerprint" and "OpenVPN" badges in your own storefront and
 customer panel, from fields the API already returns. Checked against the live API on
-4 Nov 2026 (OpenAPI 3.3.11). Full reference: <https://api.coronium.io/api-docs/>.
+13 Nov 2026 (OpenAPI 3.3.12): the fields below are unchanged. Full reference: <https://api.coronium.io/api-docs/>.
 
 There are two places a badge can appear, and they read different fields:
 
@@ -14,23 +14,29 @@ There are two places a badge can appear, and they read different fields:
 
 ## 1. Plan cards: `GET /api/v3/tariffs/available`
 
-One row per plan (country, carrier, term). Live example:
+One row per plan (country, carrier, term). A plan can hold mixed stock: some lines with
+p0f or IPv6 and some without. Live example of such a row on 13 Nov 2026 (stock and counts
+change all the time; read them, never hard-code them):
 
 ```json
 {
-  "_id": "61eff6155a33f238ac15a8ff",
+  "_id": "673c2aee724c63eb0714da77",
   "period": "month",
-  "price": 97,
-  "country_code": "GB",
-  "stock": 16,
-  "ip_stack": { "ipv4": 16, "ipv6": 0, "native_ipv6": false },
+  "price": 149,
+  "country_code": "US",
+  "stock": 35,
+  "ip_stack": { "ipv4": 18, "ipv6": 17, "native_ipv6": false },
   "features": {
-    "p0f":     { "count": 0,  "all": false },
-    "openvpn": { "count": 16, "all": true },
+    "p0f":     { "count": 17, "all": false },
+    "openvpn": { "count": 35, "all": true },
     "ipv6_native": false
   }
 }
 ```
+
+For this row the badges are "IPv6 on 17 of 35", "OS fingerprint on 17 of 35" and "OpenVPN".
+A buy with `require: ["p0f"]` gets one of the 17 p0f lines; a buy without it can get either
+kind, and IPv6 cannot be selected.
 
 | Badge | Field | Show when | Suggested label |
 |---|---|---|---|

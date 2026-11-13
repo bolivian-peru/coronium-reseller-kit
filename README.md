@@ -12,7 +12,7 @@ If you're an AI agent scaffolding a reseller dashboard, **read these first** in 
 4. [`examples/nextjs-dashboard/`](./examples/nextjs-dashboard/) - working foundation, copy and modify
 5. [`docs/webhook-integration.md`](./docs/webhook-integration.md) - the auto-swap event flow
 
-Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required; raw spec at <https://api.coronium.io/openapi.json>). This kit is synced with OpenAPI **3.3.11**, live from 3 Nov 2026 (account sign-up, crypto to account credit and saved cards added); the proxy and webhook behaviour was checked against the live API on 27 Oct 2026. What changed: [CHANGELOG.md](./CHANGELOG.md).
+Authoritative API reference - interactive OpenAPI / Swagger UI: <https://api.coronium.io/api-docs/> (public, no login required; raw spec at <https://api.coronium.io/openapi.json>). This kit is synced with OpenAPI **3.3.12**, live from 12 Nov 2026 (measured proxy health, `409 already_replaced`), plus the request limits and error answers live since 13 Nov 2026 ([Limits and error answers](#limits-and-error-answers)); checked against the live API on 13 Nov 2026. What changed: [CHANGELOG.md](./CHANGELOG.md).
 
 Prefer MCP? [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp) runs the same API as tools: `npx -y coronium-proxy-mcp@2.4.3` locally, or the hosted servers `https://api.coronium.io/mcp` (22 tools, never spends) and `https://api.coronium.io/mcp/buyer` (15 tools, 20 when purchases are allowed). See [Accounts and funding without a browser](#accounts-and-funding-without-a-browser).
 
@@ -57,7 +57,7 @@ ask me before any paid test purchase.
 |---|---|
 | `GET /api/v3/account/proxies` | List proxies you own |
 | `GET /api/v3/account` | Account credit, BTC and USDT balances |
-| `GET /api/v3/account/proxies/health` | Per-proxy `is_alive` + `recommendation` |
+| `GET /api/v3/account/proxies/health` | Per-proxy `health` (`state` `ok`, `degraded`, `down` or `unknown`, plus `checked_at` and `source`), `is_alive` and the older `recommendation`. Automate on `health.state` |
 | `GET /api/v3/tariffs/available` | In-stock tariffs, with `features.p0f.count` and `features.openvpn.count` per plan |
 | `GET /api/v3/free-modems` | Stock per country, carrier and region, with `p0f_count` per region |
 | `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id`, optional `require: ["p0f"]` |
@@ -68,7 +68,7 @@ ask me before any paid test purchase.
 | `POST /api/v3/modems/{id}/restart` | Rotate IP. Classic proxies: 200, branch on `rotated`; `429` within 60 s of the last rotation. Rows with `proxyEndpoints`: 202 pending, poll `rotation-status`; a refusal is `409`, `429` (wait `Retry-After`) or `502 rotation_unconfirmed` (poll, do not resend); read `code` and `suggested_action` |
 | `GET /api/v3/modems/{id}/rotation-status` | `idle`, `rotating`, `done` or `failed` for the last rotation |
 | `PUT /api/v3/modems/{id}/set-rotation-interval` | Auto-rotate every N **seconds** (min 60, 0 disables). Only where `capabilities.rotationInterval` allows; otherwise `409 action_unsupported`. On rows with `proxyEndpoints` the value must be whole minutes (a multiple of 60, max 2592000); `409` = device offline, `502` = not confirmed, refresh before retrying |
-| `POST /api/v3/modems/{id}/replace` | Swap a broken proxy (same country, remaining time and `metadata` kept). A p0f line gets a p0f line or `409 p0f_replacement_unavailable`; send `{"allow_without_p0f": true}` to accept one without. No replacement in stock = `400 "No free modems!"` (not 409 no_stock, branch on status + message); daily limit = 400; failed delivery = 500 with the current proxy unchanged and no late second line; a concurrent call = `409 request_in_progress`; lines that cannot be replaced through the API = `409` (`action_unsupported`, or `internal_error` with an error that says to contact support); a move already running = `409` "being moved right now" (retry in a few minutes); `500` "needs a check by support" = do not retry, contact support. A moved line answers `moved: true` with the same id |
+| `POST /api/v3/modems/{id}/replace` | Swap a broken proxy (same country, remaining time and `metadata` kept). A p0f line gets a p0f line or `409 p0f_replacement_unavailable`; send `{"allow_without_p0f": true}` to accept one without. No replacement in stock = `400 "No free modems!"` (not 409 no_stock, branch on status + message); daily limit = 400; failed delivery = 500 with the current proxy unchanged and no late second line; a concurrent call = `409 request_in_progress`; lines that cannot be replaced through the API = `409` (`action_unsupported`, or `internal_error` with an error that says to contact support); a move already running = `409` "being moved right now" (retry in a few minutes); `500` "needs a check by support" = do not retry, contact support. A proxy you already replaced = `409 already_replaced` with `current_modem` `{_id, name}` (the proxy that replaced it, or null if it left your account), nothing changes. A moved line answers `moved: true` with the same id |
 | `GET /api/v3/modems/{id}/p0f-options` | OS values this line accepts, and its `vocabulary` |
 | `PUT /api/v3/modems/{id}/set-os` | Set the OS fingerprint (`{"os": "<value>"}`, `""` turns it off). `200` = applied (`data.applied: true`, or `data.noop: true` when the value was already set), `202` `pending: true` = sent, not yet confirmed |
 | `GET /api/v3/modems/{id}/openvpn` | Download the `.ovpn` profile. `503 openvpn_profile_pending` = retry after `Retry-After`, never replace |
@@ -80,12 +80,12 @@ ask me before any paid test purchase.
 | `GET /api/v3/account/payments` | Your payment ledger, for reconciliation |
 | `GET /api/v3/payments/{payment_id}/status` | Follow one payment, for example after a `503 PAYMENT_DELIVERY_UNCONFIRMED` that carries `paymentId` |
 | `GET /api/v3/account/subscriptions` | Auto-renew state per proxy |
-| `PUT /api/v3/account/webhook` | Register HTTPS webhook for account events |
+| `PUT /api/v3/account/webhook` | Register a public HTTPS webhook for account events (private or non-resolving hosts answer `400 invalid_webhook_target`; redirects are not followed) |
 | `GET /api/v3/account/webhook` | Read current webhook URL |
 | `POST /api/v3/account/webhook/secret/rotate` | Create or rotate your own signing secret (shown once) |
-| `POST /api/v3/account/webhook/test` | Fire a real signed test event and get the delivery result |
+| `POST /api/v3/account/webhook/test` | Fire a real signed test event and get the delivery result: `delivered`, `status_code`, `latency_ms`, and on failure a short `error` with `error_code`. Your endpoint's body is never returned (`response_preview` is null) |
 
-Auth: `Authorization: Bearer <jwt>` header. Get your JWT at <https://dashboard.coronium.io> → Your Account → API Access, or let an agent create the account and the key through the API ([below](#accounts-and-funding-without-a-browser)). `POST /get-token` and `POST /signup` never reveal whether an account exists: an unknown address and a wrong password both answer `401 Invalid email or password.`, and sign-up answers `200 {"result":"ok"}` for every valid address.
+Auth: `Authorization: Bearer <jwt>` header. Use the account API key from <https://dashboard.coronium.io> → Your Account → API Access, or let an agent create the account and the key through the API ([below](#accounts-and-funding-without-a-browser)). The API key needs no two-factor code, keeps working after a password change, and authenticates only the request it is sent with: it never creates a dashboard session. Do not automate `POST /get-token` with a password: on an account with two-factor login it needs the current code as `code` (without it: `401`, `code` `two_factor_required`), its token ends when the password or two-factor setting changes or on "log out everywhere", and failed sign-ins are limited. `/api/v1/create-token` is retired and answers `410`. `POST /get-token` and `POST /signup` never reveal whether an account exists: an unknown address and a wrong password both answer `401 Invalid email or password.`, and sign-up answers `200 {"result":"ok"}` for every valid address.
 
 ### Accounts and funding without a browser
 
@@ -93,8 +93,8 @@ An agent can open the account, fund it and buy with no dashboard visit. The acco
 
 | Method · Path | Purpose |
 |---|---|
-| `POST /api/v3/signup` | `{login, password, name, purpose?}`. Disposable and reserved email domains are refused. A verification email is sent; nothing waits for it |
-| `POST /api/v3/get-token` | `{login, password}` → a session token |
+| `POST /api/v3/signup` | `{login, password, name, purpose?}`. Disposable and reserved email domains (including `.test`, `.example`, `.invalid`, `.localhost`) are refused. At most 5 accounts per IP address a day and 5 per uncommon email domain an hour (`429` with `Retry-After`). `name` at most 80 characters, `purpose` 500; no `<` or `>` in `name`. A verification email is sent; nothing waits for it |
+| `POST /api/v3/get-token` | `{login, password}` (plus `code` on a two-factor account) → a session token, used once to fetch the API key below |
 | `GET https://api.coronium.io/api/v1/account/api-token` | With the session token as Bearer: `{token, expiresAt}`, the 365-day API key (the same key as Dashboard → Account → API Access) |
 | `GET /api/v3/account/crypto-balance` | USDT (TRC-20) and BTC deposit addresses and balances, plus account credit. An array: `coin` is `btc`, `usdt` or `account_credit`. The first call creates missing deposit wallets |
 | `POST /api/v3/account/balance/convert` | Moves the account's own confirmed USDT and/or BTC into USD account credit, one way (BTC at the live rate, USDT 1:1). Body `{coin, amount_usd?, dry_run?}`: `coin` is `usdt`, `btc` or `all` (default `all`), `amount_usd` a number of at least 1 (single coin only), `dry_run: true` previews. A real move needs an `Idempotency-Key` header (8-128 letters, digits, `_` or `-`; a UUID works). `200` `data` = `{moved: [{coin, coin_amount, usd, rate, move_id, status, replay}], refused, account_credit_before, account_credit_after}`. A coin that cannot move now (BTC not yet confirmed, an open crypto order) is listed in `refused` with its `code`; when nothing moved the status is `409`, and less than $1 to move is `409 nothing_to_move` with `coin: "all"` (a single coin lists `NOTHING_TO_MOVE` in `refused`). A key with `.` or `:`, or longer than 128 characters, answers `400` "Invalid Idempotency-Key format" |
@@ -108,7 +108,7 @@ The same flow as MCP tools: start `npx -y coronium-proxy-mcp@2.4.3` with no `COR
 
 No header is needed to see stock. Without any header you are offered, and sold, units that are verified to accept **one login on both ports** (HTTP and SOCKS5), so the ordinary `proxy_login` / `proxy_password` fields are complete. The header `X-Coronium-Proxy-Credentials: separate-protocol-v1` is optional: send it on stock, tariff and purchase calls to **also** be offered units whose HTTP and SOCKS5 have different hosts or logins, and then read `proxyEndpoints.http` and `proxyEndpoints.socks5` independently (the legacy fields describe HTTP only). Neither mode bypasses supplier consent, health checks or rental-term coverage, and an order with `autoRenew: true` is only filled from units that support it. `proxyEndpoints.provider` is an opaque label: never branch on it. The one documented value is `coronium_node` (Coronium Node rows, which also carry it as a top-level `provider`); see [stock and credentials](docs/stock-and-credentials.md#coronium-node-rows). Branch on `proxyEndpoints.capabilities`, and hide any action a proxy does not advertise (some line types do not advertise customer auto-renew or replacement). `renewalCoveredUntil` is informational, not a customer rental deadline; `POST /payment/renewal-quote` decides what can be renewed.
 
-Coupons, including any reseller discount on your account, apply on both the account-credit and the BTC lane. Send `"coupon": {"coupon_name": "..."}` and read the result from `billing.discount`.
+Coupons, including any reseller discount on your account, apply on both the account-credit and the BTC lane. Send `"coupon": {"coupon_name": "..."}` and read the result from `billing.discount`. Validate a code once with `POST /api/v3/coupons/check` and cache the answer: see [Limits and error answers](#limits-and-error-answers).
 
 ### OS fingerprint (p0f) and OpenVPN
 
@@ -158,6 +158,33 @@ Every 4xx/5xx on `/api/v3` carries:
 
 `error` is the human string, `code` the machine identifier. Log `request_id` (also returned as the `X-Request-Id` header) and quote it in support tickets. Out of stock is **409 with `code: "no_stock"`** on `/api/v3` (the same answer carries `reason_code: "OUT_OF_STOCK"`, the spelling `/api/v1` and the `proxy.purchase_failed` webhook use; branch on either). Do not retry-loop or switch products without asking the buyer. A buy with `require: ["p0f"]` refused for lack of p0f units answers `409 p0f_unavailable` instead.
 
+## Limits and error answers
+
+Live since 13 Nov 2026. Branch on the HTTP status first.
+
+| Situation | Answer | What to do |
+|---|---|---|
+| `POST /api/v3/coupons/check` with a valid code | `200 {data: {discount: "15%"}}` (`discount: 0` = this account already used it) | Cache the result for the session and send the code with the order |
+| Unknown, expired, revoked or not-applicable code | `404`, one message for all: "This coupon code is not valid for your account." (the envelope `code` is not specific) | Show "code not valid"; do not try variations |
+| `coupon_name` missing, empty, longer than 64 characters or not a string | `400` "Enter a coupon code." | Send a string |
+| Coupon checks above the limit (120 per 10 minutes per account and per IP address) or too many misses (10 a day per account, 30 per network) | `429` with `Retry-After` | Wait; validate once and cache instead of checking before every order |
+| Malformed payment, ticket or pool id in the path, a value of the wrong type, invalid JSON | `400`, `code` `invalid_request` with `reason_code` `BAD_PARAMETERS` (was `500`) | Fix the request; do not retry it unchanged |
+| A body or query key that starts with `$` | `400`, `code` `BAD_PARAMETERS` | Send plain values |
+| `POST /get-token` too often from one IP address (5 in 10 s, 15 a minute, 60 an hour) or too many failed sign-ins (10 per account and network in 15 minutes, 30 per IP address in an hour) | `429` with `Retry-After` and `retry_after_seconds` | Wait that long. Use the API key instead of signing in |
+| `POST /get-token` on a two-factor account without the current `code` | `401`, `code` `two_factor_required` (counts as a failed sign-in) | Send `code`, or use the API key |
+| `POST /api/v1/create-token` | `410` | Use the API key |
+| Sign-up above 5 accounts per IP address a day or 5 per uncommon email domain an hour; reserved test domains | `429` with `Retry-After`; `400` for the domain | Create accounts only when a person asks for one |
+| `name` over 80 characters, `company_name` over 120, `purpose` over 500, or `<` / `>` in `name` or `company_name` | `400` naming the field; nothing is cut | Shorten or clean the value |
+| A pool plan id on a line purchase route | `400 not_a_modem_tariff`, nothing charged | Pick a plan from `GET /tariffs/available` |
+| Renewal of a line whose plan is not a dedicated-line plan | `409 modem_tariff_invalid`, nothing charged | Contact support |
+| `PUT /account/webhook` with a private, internal or non-resolving host | `400 invalid_webhook_target` | Use a public `https://` URL; redirects are not followed |
+
+Every `429` carries a `Retry-After` header in seconds. Wait at least that long; do not retry sooner or switch keys or addresses to get around it.
+
+Hosted MCP connections (`https://api.coronium.io/mcp` and `/mcp/buyer`) end when the account password or two-factor setting changes or on "log out everywhere"; connect again. An API key used as Bearer is not affected.
+
+IP whitelisting is not available on any line sold today: every line uses login and password, and `proxyEndpoints.capabilities.whitelist` is false. Feature-detect that flag and hide the control.
+
 ## Core integration pattern (read this once)
 
 ### 1. The `metadata` field is your customer-mapping layer
@@ -174,7 +201,7 @@ POST /api/v3/payment/buy-modems-with-crypto-balance
 }
 ```
 
-`max_total_usd` is the total the buyer approved (tariff `price` x `modemCount`); above it the answer is `409 price_changed` and nothing is charged. `modemCount` is the field name - `modem_count` and `count` are ignored, and the request fails with `Bad modem count`. Country and carrier come from the **tariff**; sending them in the body does nothing. Send `metadata` as an object or a string: the API JSON-serializes objects and preserves strings. The example uses a serialized string. Keep the same `Idempotency-Key` and exact body on every retry of one order.
+`max_total_usd` is the total the buyer approved (tariff `price` x `modemCount`); above it the answer is `409 price_changed` and nothing is charged. `modemCount` is the field name - `modem_count` and `count` are ignored, and the request fails with `Bad modem count`. Country and carrier come from the **tariff**; a body `country_id` or `carrier_id` does not override them. Only dedicated-line plans are accepted on line purchase and renewal routes: a pool plan id answers `400 not_a_modem_tariff` and nothing is charged. Send `metadata` as an object or a string: the API JSON-serializes objects and preserves strings. The example uses a serialized string. Keep the same `Idempotency-Key` and exact body on every retry of one order.
 
 `GET /account/proxies` returns the stored string; parse it defensively before filtering by `customer_id`, because plain strings are also valid. To repair a missing mapping, verify the current owned modem against its purchase receipt, preserve the complete value and read it back after `set-metadata`. Never overwrite a conflicting mapping or re-buy to recover metadata. Full pattern in [`docs/metadata-strategy.md`](./docs/metadata-strategy.md).
 
@@ -219,7 +246,7 @@ Treat active proxies as customer-owned service. Check current ownership and capa
 ## Hard rules (also in AGENTS.md, repeated here for human readers)
 
 1. **Never put `CORONIUM_API_KEY` in client-side code.** Server-side only. Protect the operator dashboard before putting it online.
-2. **Use HTTPS for your webhook URL.** HTTP returns 400, and so does any private or non-resolving host.
+2. **Use a public HTTPS webhook URL.** HTTP returns 400, and so does any private or non-resolving host. Redirects are not followed.
 3. **Persist the signed webhook durably before acknowledging it within 5 seconds.** Non-2xx is retried; dedupe on `event_id` and process from a durable inbox.
 4. **Verify `X-Coronium-Signature`** over the raw request bytes before trusting a payload.
 5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice. A real `POST /account/balance/convert` move requires one in the same format.

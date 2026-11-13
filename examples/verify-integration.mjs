@@ -53,13 +53,16 @@ async function call(path, init) {
     const text = await r.text();
     let body = null;
     try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
-    return { status: r.status, body, requestId: r.headers.get('x-request-id') };
+    return { status: r.status, body, requestId: r.headers.get('x-request-id'), retryAfter: r.headers.get('retry-after') };
 }
 
 /** Errors carry {error, code, suggested_action, request_id} - surface all of it. */
 function describeError(res) {
     const parts = [`HTTP ${res.status}`, res.body?.error || '(no error string)'];
     if (res.body?.code) parts.push(`code=${res.body.code}`);
+    if (res.body?.reason_code) parts.push(`reason_code=${res.body.reason_code}`);
+    // 429: a request limit was reached. Wait Retry-After seconds before running again.
+    if (res.status === 429 && res.retryAfter) parts.push(`retry_after=${res.retryAfter}s`);
     if (res.body?.suggested_action) parts.push(`action=${res.body.suggested_action}`);
     const rid = res.body?.request_id || res.requestId;
     if (rid) parts.push(`request_id=${rid}`);
@@ -224,7 +227,9 @@ async function main() {
             if (test.status === 200 && test.body?.delivered === true) {
                 ok(`test event accepted - status_code=${test.body.status_code} latency_ms=${test.body.latency_ms ?? '?'}`);
             } else if (test.status === 200) {
-                bad(`test event not accepted - status_code=${test.body?.status_code ?? 'none'} ${test.body?.error || test.body?.hint || ''}`);
+                // error_code: invalid_url, refused_target, dns_failed, timeout, tls_error or
+                // connection_failed. A 3xx status_code = your endpoint redirected (not followed).
+                bad(`test event not accepted - status_code=${test.body?.status_code ?? 'none'}${test.body?.error_code ? ` error_code=${test.body.error_code}` : ''} ${test.body?.error || test.body?.hint || ''}`);
             } else {
                 bad(`test event failed - ${describeError(test)}`);
             }
