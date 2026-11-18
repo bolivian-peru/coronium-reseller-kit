@@ -77,7 +77,10 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
                                 };
                                 return (
                                     <tr key={p._id} className="border-t border-zinc-800">
-                                        <td className="py-2 font-mono text-xs">{p.name}</td>
+                                        <td className="py-2 font-mono text-xs">
+                                            {p.name}
+                                            {p.dataAllowanceNote?.text && <div>{p.dataAllowanceNote.text}</div>}
+                                        </td>
                                         <td className="py-2 font-mono text-xs text-zinc-400">
                                             <div>HTTP {http.host}:{http.port}</div><div>SOCKS5 {socks.host}:{socks.port}</div>
                                         </td>

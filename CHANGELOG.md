@@ -4,6 +4,20 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.19 - owned Node line controls and renewal warnings
+
+The November 17 API release added the following fields and controls. Check the
+capabilities of each rental before offering an action.
+
+- Node lines can advertise a rotation timer and balance auto-renewal after purchase.
+  The stock guide gives the timer limits and the consent and price fields for enrolment.
+- A previous IP change awaiting confirmation can return `409 rotate_unavailable`
+  with `suggested_action: retry_later`. Refresh status after a minute.
+- A renewal quote can include a per-line warning about a prolonged loss of service.
+  The starter dashboard displays the warning before the operator confirms the renewal.
+- A declared monthly data allowance is optional. Whitelisting and usage are also
+  conditional on the fields returned for the owned line.
+
 ## 2026.11.13 - request limits, clearer error answers, measured health, pins
 
 Checked against OpenAPI 3.3.12 (live from 12 Nov 2026) and the live API on 13 Nov 2026.

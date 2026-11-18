@@ -7,7 +7,7 @@ export const runtime = 'nodejs';
 export async function POST(req: NextRequest) {
     let body: any;
     try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
-    const { modem_id, customer_id, days, lane = 'account_credit', idempotency_key, expected_total_cents, action } = body || {};
+    const { modem_id, customer_id, days, lane = 'account_credit', idempotency_key, expected_total_cents, acknowledged_warnings, action } = body || {};
     if (typeof modem_id !== 'string' || typeof customer_id !== 'string' ||
         ![1, 7, 30].includes(days) || !['account_credit', 'crypto_btc'].includes(lane) ||
         !['quote', 'renew'].includes(action)) {
@@ -28,6 +28,12 @@ export async function POST(req: NextRequest) {
         if (action === 'quote') return NextResponse.json(quote);
         if (quote.total_cents !== expected_total_cents) {
             return NextResponse.json({ error: 'Price changed. Get a new quote before renewing.', quote }, { status: 409 });
+        }
+        const unseenWarning = quote.warnings?.some(warning =>
+            !Array.isArray(acknowledged_warnings) || !acknowledged_warnings.some(seen =>
+                seen?.modem_id === warning.modem_id && seen?.code === warning.code && seen?.message === warning.message));
+        if (unseenWarning) {
+            return NextResponse.json({ error: 'Review the updated warning before renewing.', code: 'renewal_warning_changed', quote }, { status: 409 });
         }
         // max_total_usd makes the server refuse (409 price_changed, nothing charged)
         // if its total moved above the approved quote between the two calls.

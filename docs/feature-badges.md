@@ -46,6 +46,12 @@ kind, and IPv6 cannot be selected.
 
 `features.ipv6_native` is the same flag as `ip_stack.native_ipv6`; read either.
 
+Both tariff and regional stock rows may also carry `dataAllowanceNote`. Its
+`gbPerMonth` and `text` describe the lowest declared monthly allowance among
+the units that have a declaration. `count` counts those units and `all` says
+whether all units have a declaration. With mixed stock, identify the count.
+An absent note means the allowance is unspecified.
+
 What a buy can guarantee:
 
 - **p0f** is the only feature a buy can require. Send `"require": ["p0f"]` and the

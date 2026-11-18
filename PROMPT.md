@@ -39,7 +39,7 @@ and https://api.coronium.io/openapi.json. Build a Node CLI directly against
 the REST API using Bearer auth with my account API key (never a password
 sign-in loop) and server-side secrets. It should list tariffs,
 show account credit and BTC separately, buy with a stable Idempotency-Key,
-quote and renew an owned modem, and display separate HTTP/SOCKS5 endpoints
+show the quote and any warnings before renewing an owned modem, and display separate HTTP/SOCKS5 endpoints
 separately. Store customer mappings durably. No dashboard is required.
 ```
 
@@ -54,7 +54,8 @@ the same client AGENTS.md uses). For /rotate follow AGENTS.md rule 8 and the
 failure table: 200 rotated:true/false on classic lines; 202 pending:true -> poll
 rotation-status, never resubmit; 429 -> wait Retry-After; a 409 on a line with
 proxyEndpoints -> branch on code + suggested_action, never on the status alone,
-and if the error says the last rotation is under review, tell the user and stop.
+and when the previous IP change is still being confirmed, pause new rotations
+and refresh its status after a minute.
 Crypto payment: end-customers pay me in my own wallet (TON or USDT-TRC20). Do
 not automate funding Coronium and never send funds on-chain from my wallet.
 I fund my Coronium balance myself, as account credit (dashboard) or USDT

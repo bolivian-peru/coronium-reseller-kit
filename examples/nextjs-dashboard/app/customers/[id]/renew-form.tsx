@@ -1,11 +1,12 @@
 'use client';
 
 import { useState } from 'react';
+import type { RenewalQuote } from '@/lib/coronium';
 
 export function RenewForm({ modemId, customerId }: { modemId: string; customerId: string }) {
     const [days, setDays] = useState(30);
     const [lane, setLane] = useState<'account_credit' | 'crypto_btc'>('account_credit');
-    const [quote, setQuote] = useState<{ total_usd: number; total_cents: number } | null>(null);
+    const [quote, setQuote] = useState<RenewalQuote | null>(null);
     const [message, setMessage] = useState('');
     const [busy, setBusy] = useState(false);
 
@@ -31,11 +32,16 @@ export function RenewForm({ modemId, customerId }: { modemId: string; customerId
             const response = await fetch('/api/coronium/renew', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...payload, action, idempotency_key: intent?.key, expected_total_cents: quote?.total_cents }),
+                body: JSON.stringify({ ...payload, action, idempotency_key: intent?.key, expected_total_cents: quote?.total_cents, acknowledged_warnings: quote?.warnings }),
             });
             const data = await response.json();
             if (response.status === 409 && data?.quote?.total_cents != null) {
-                // Price changed, nothing charged: show the new total and ask again with a new key.
+                if (data.code === 'renewal_warning_changed') {
+                    setQuote(data.quote);
+                    setMessage('Review the updated warning before confirming.');
+                    return;
+                }
+                // No charge was made at the new price. Ask again before resubmitting.
                 sessionStorage.removeItem(storageKey);
                 setQuote(data.quote);
                 setMessage(`Price changed to $${Number(data.quote.total_usd).toFixed(2)}. Nothing was charged. Confirm again to renew.`);
@@ -72,6 +78,9 @@ export function RenewForm({ modemId, customerId }: { modemId: string; customerId
                 <option value="account_credit">Credit</option><option value="crypto_btc">BTC</option>
             </select>
         </div>
+        {quote?.warnings?.map(warning => (
+            <p key={warning.modem_id + warning.code} className="text-xs text-amber-300">{warning.message}</p>
+        ))}
         <button className="btn" type="button" disabled={busy} onClick={() => submit(quote ? 'renew' : 'quote')}>
             {busy ? 'Checking…' : quote ? `Confirm $${quote.total_usd.toFixed(2)}` : 'Get renewal quote'}
         </button>

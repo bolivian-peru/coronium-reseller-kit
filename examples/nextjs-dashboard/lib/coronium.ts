@@ -71,6 +71,14 @@ function couponBody(coupon?: string) {
 }
 
 // ─── Types (only the fields the dashboard uses) ──────────────────────────
+export interface RenewalQuote {
+    currency: 'USD';
+    total_usd: number;
+    total_cents: number;
+    line_items: unknown[];
+    warnings?: { modem_id: string; code: string; message: string }[];
+}
+
 export interface Proxy {
     _id: string;
     name: string;
@@ -100,6 +108,7 @@ export interface Proxy {
         };
         openvpn?: { available: boolean; download_url: string | null };
         native_ipv6?: boolean;
+        whitelist?: { available: boolean };
     };
     /**
      * Per-protocol connection details. Present on proxies delivered under a
@@ -115,6 +124,14 @@ export interface Proxy {
         http?: Endpoint;
         socks5?: Endpoint;
         capabilities?: ProxyCapabilities;
+        rotationState?: 'busy' | 'needs_review' | null;
+        rotationSchedule?: {
+            interval_seconds: number;
+            next_rotation_at: number | null;
+            min: number;
+            max: number;
+            step: number;
+        };
     };
     /** `coronium_node` on Coronium Node rows; absent on other rows. */
     provider?: string;
@@ -127,6 +144,12 @@ export interface Proxy {
      * a term can be renewed.
      */
     renewalCoveredUntil?: string | number | null;
+    dataAllowanceNote?: { gbPerMonth: number; text: string } | null;
+    lineHealth?: {
+        state: 'connected' | 'online' | 'offline' | 'no_data';
+        label: string;
+        checkedAt: number;
+    };
 }
 
 /** Every flag is optional and defaults to "not supported". New flags can appear. */
@@ -191,9 +214,8 @@ export interface RotationStatus {
     ext_ip?: string | null;
     rotated_at?: number | null;
     /**
-     * 'device did not confirm the outcome' on a failed rotation means the line is
-     * under review: /restart answers 409 until support resolves it. Ignore the
-     * "retry after 2 minutes" hint in that case.
+     * A Node change still being confirmed can report state 'failed'. Refresh
+     * status after a minute and keep rotation paused while it is unresolved.
      */
     reset_error?: string | null;
     hint?: string | null;
@@ -256,6 +278,13 @@ export interface HealthResponse {
     generated_at_ms: number;
 }
 
+export interface StockAllowanceNote {
+    gbPerMonth: number;
+    text: string;
+    count: number;
+    all: boolean;
+}
+
 export interface Tariff {
     _id: string;
     name: string;
@@ -267,6 +296,7 @@ export interface Tariff {
     carrier_id?: string;
     carrier_name?: string;
     stock?: number;
+    dataAllowanceNote?: StockAllowanceNote;
     /**
      * Per-feature availability in this plan's stock. `count` = units that have it,
      * `all` = every unit has it. `p0f.count` is exactly what a buy with
@@ -287,6 +317,7 @@ export interface StockRow {
     count: number;
     /** How many of `count` a buy with `require: ["p0f"]` and this region_id can get. */
     p0f_count: number;
+    dataAllowanceNote?: StockAllowanceNote;
 }
 
 export interface BuyResult {
@@ -397,10 +428,8 @@ export const coronium = {
          * - 502 rotation_unconfirmed: the rotation was submitted; poll
          *   rotationStatus(), do not resend.
          * - 409 on a Coronium Node row: read err.code and err.suggested_action.
-         *   - First check the message. If err.message contains 'no confirmed
-         *     outcome', the line is under review. Stop rotating and contact
-         *     support with err.request_id. Retrying never clears it, whatever
-         *     suggested_action says.
+         *   - rotate_unavailable + retry_later: the previous IP change is still
+         *     being confirmed. Refresh status after a minute without rotating again.
          *   - modem_rotation_in_progress: poll rotationStatus().
          *   - rotate_unavailable + retry_after_2_minutes: retry once after 120 s.
          *     This refusal has no Retry-After, so err.retry_after_seconds is undefined.
@@ -409,8 +438,6 @@ export const coronium = {
          * - 503 on a Coronium Node row (code modem_rotation_in_progress, error
          *   'Rotation unavailable'): rotation is unavailable right now. Do not
          *   poll rotationStatus(); try later.
-         * - rotationStatus(): state 'failed' with reset_error 'device did not
-         *   confirm the outcome' is the review case above, not "retry after 2 minutes".
          *
          * `requestId` (UUIDv4): generate it with crypto.randomUUID() once per user
          * action and reuse it on network retries, so a retry replays the recorded
@@ -521,15 +548,10 @@ export const coronium = {
         revokeOpenvpn: (id: string) =>
             call<{ result: 'ok'; cleanupConfirmed: true }>(`/modems/${encodeURIComponent(id)}/openvpn/revoke`, { method: 'POST' }),
         /**
-         * Auto-rotate every N SECONDS. Minimum 60; 0 disables. Sending minutes
-         * here (e.g. 5 meaning "5 minutes") is rejected with a 400 - anything
-         * between 1 and 59 is invalid. On a line whose
-         * proxyEndpoints.capabilities.rotationInterval is false, the call answers
-         * 409 action_unsupported and changes nothing. Use rotate() for on-demand
-         * rotation instead. Rows with proxyEndpoints take whole minutes only (a
-         * multiple of 60, max 2592000; 90 is a 400), answer 409 when the device
-         * is offline and 502 when the change is not confirmed (refresh before
-         * retrying), and return {result, applied: true, data: {_id, rotation_interval}}.
+         * Send seconds. Zero turns a stored timer off. On a Node rental, check
+         * capabilities.rotationInterval before setting a timer and use the
+         * rotationSchedule bounds (120–86400 in steps of 60). Other timed rows
+         * with proxyEndpoints take 60–2592000 in steps of 60. Classic minimum: 60.
          */
         setRotationInterval: (id: string, seconds: number) =>
             call<{ result: string; applied?: boolean; data: { _id: string; name?: string; rotation_interval: number } }>(
@@ -605,7 +627,7 @@ export const coronium = {
                 headers: { 'Idempotency-Key': idempotencyKey },
             }),
         renewalQuote: (modemId: string, days: number, coupon?: string) =>
-            call<{ currency: 'USD'; total_usd: number; total_cents: number; line_items: any[] }>('/payment/renewal-quote', {
+            call<RenewalQuote>('/payment/renewal-quote', {
                 method: 'POST', body: JSON.stringify({ modems: [{ modem_id: modemId, days }], ...couponBody(coupon) }),
             }),
         /**

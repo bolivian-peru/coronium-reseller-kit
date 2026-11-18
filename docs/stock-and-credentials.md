@@ -42,13 +42,15 @@ fields.
 |---|---|---|
 | Recognise it | No `proxyEndpoints` | `proxyEndpoints` present |
 | Rotation | `POST /restart` answers 200 with `rotated`; `429` within 60 s of the last rotation | `POST /restart` answers **202** `pending: true`; poll `GET /modems/{id}/rotation-status` until `done` or `failed`; a refusal changes nothing: `409` (`modem_rotation_in_progress`, `rotate_unavailable`, `modem_expired`), `429 rotation_too_soon` (wait `Retry-After`) or `502 rotation_unconfirmed` (poll, do not resend); `rotate_unavailable` + `check_proxy_health` = offline. Node specifics in [Coronium Node rows](#coronium-node-rows) |
-| Renewal | Explicit renewal; auto-renew where offered | Manual renewal only: `POST /payment/renewal-quote`, then a `/payment/renew-*` route |
+| Renewal | Explicit renewal; auto-renew where offered | Quote and renew explicitly. Owned Node lines with `capabilities.autoRenew` also offer balance renewal |
 | Replace | Available | `409`; read `capabilities` |
 | OS fingerprint | Where `features.p0f.server_supported` is true | Only when `proxyEndpoints.capabilities.p0f` is true; otherwise `400 p0f_unsupported_on_server`. `set-os` can answer `202` `pending: true` until the line confirms |
 
-`"autoRenew": true` on a buy is never filled from one-time-rental stock. If only such
-units are left the answer is `409 auto_renew_unavailable` (`retry_without_auto_renew`),
-before any charge.
+A recurring checkout can return `409 auto_renew_unavailable` before charging.
+With `suggested_action: retry_without_auto_renew`, offer a one-time purchase and
+remove the recurring intent only with the buyer’s approval. With `choose_one_time_plan`,
+the plan itself recurs and the buyer needs a different plan. A `503 availability_unchecked`
+means availability could not be verified and nothing was charged.
 
 ## Coronium Node rows
 
@@ -57,11 +59,16 @@ They are the one documented `provider` value: the row carries a top-level
 `provider: "coronium_node"` and the same value in `proxyEndpoints.provider`. Still decide
 what to show from `capabilities`, not from the label.
 
+- For an owned Node line advertising `proxyEndpoints.capabilities.autoRenew`, read `GET /modems/{id}/auto-renewal?days=30` and show the offer. With explicit approval send `PUT /modems/{id}/auto-renewal` with `{mode:"balance", autoRenewConsent:true, days:offer.days, expected_price_usd:offer.price_usd}`. Disable with `{mode:"off"}`. A one-time checkout does not enrol the line. A missing offer gives no price to approve. If the price changes, show the new price and ask again. A 404 on this route means it is unavailable for this line.
+- Show any `warnings[].message` from the renewal quote before the customer confirms. `NODE_LINE_NOT_SERVING` means the line has been observed down for at least 24 hours. The customer can still renew.
+- Use seconds for `rotation_interval`. Zero disables a timer. For a Node line, use the bounds returned in `proxyEndpoints.rotationSchedule` (120–86400 in steps of 60) when `capabilities.rotationInterval` is true. A stored schedule can still be turned off. Other timed rows with `proxyEndpoints` accept 60–2592000 in steps of 60. Classic rows accept 60 or more.
 - One login and password on both ports (`credentials: "shared-protocol-v1"`). `proxy_login`
   is fixed (`cnr_<modem id>`); `PUT /modems/{id}/change-password` takes 8-128 printable
   ASCII characters without spaces.
 - `providerState` (`tunnel_connected`, `offline`, `unknown`) and `providerObservedAt`
   (epoch ms) report the device connection. `ext_ip` can be `null` until the device reports.
+  When present, `lineHealth` reports `state` (connected, online, offline or no_data),
+  a display `label` and the observation time in `checkedAt`.
 - Rotation answers 202. Send a UUIDv4 `request_id` in the body to make a retry safe; at
   most one request every two minutes. A refused rotate answers `409` and nothing is queued.
   The body carries `error` (a readable reason), `code` and `suggested_action`.
@@ -75,21 +82,13 @@ what to show from `capabilities`, not from the label.
     the proxy list.
   - `503` with `error` "Rotation unavailable" (`code` `modem_rotation_in_progress`): rotation
     is unavailable right now. Do not poll `rotation-status`; show it and try later.
-  - When `error` says the last rotation has no confirmed outcome and is under review, every
-    rotate on that line is refused until support resolves it. The code can be either
-    `rotate_unavailable` variant, so match on that text. Do not retry it in a loop and do not
-    replace. Show the message and contact support with the `request_id`.
-- If the device never confirms a rotation, `rotation-status` reports `state: "failed"` with
-  `reset_error: "device did not confirm the outcome"`. That is the "under review" case
-  above: ignore the status hint's "retry after 2 minutes" and show the line as "rotation
-  under review".
+  - On a Node row, `proxyEndpoints.rotationState` can be `busy`, `needs_review` or null. A `409 rotate_unavailable` with `suggested_action: retry_later` means the previous IP change is still being confirmed. Refresh status after a minute and keep new rotation requests paused until the hold clears. The status response can say `state: "failed"` and `reset_error: "the IP change is still being confirmed"`. Refresh status again if confirmation is still pending. Contact support with the request ID if it persists.
 - The token URL (`GET /modems/rotate-modem-by-token/{token}`) answers `202` with
   `pending: true` and a `status_url` on these rows. Follow `status_url` as returned and do
   not resend. Its refusals are `409`. Their `code` usually reads `modem_rotation_in_progress`
   with `suggested_action` `poll_rotation_status` whatever the reason, and an ended or
   foreign rental can come back as `internal_error`. Ignore both there and read `error`:
-  busy, too soon, "has no confirmed outcome and is under review" (stop and contact
-  support), or an active rental required (reload the proxy list). `503` carries the same
+  busy, too soon, previous change still being confirmed (check status later), or an active rental required (reload the proxy list). `503` carries the same
   code; treat it as rotation unavailable now.
   Its `status_url` may be on a neutral short-link host (for example
   `https://ipreset.xyz/s/<token>`), outside `/api/v3`. Follow it as returned: it answers
@@ -99,24 +98,17 @@ what to show from `capabilities`, not from the label.
   with the same token instead. Both answer
   `{data: {status, ext_ip, rotated_at, command, providerState, rotation}}`, not the `state`
   of `rotation-status`. Poll `data.rotation` until `pending` is false: `success: true` is
-  done, `needs_review: true` is under review (stop and contact support), any other `result`
+  done, `needs_review: true` means the IP change is still being confirmed (refresh status later), any other `result`
   is failed.
 - `capabilities.http`, `socks5` and `udp` say which protocols passed qualification of this
   exact device. `usage` and `speedTest` enable `GET /modems/{id}/usage` and
   `/modems/{id}/speed-test`. On a line of any other type these routes answer `404 not_found`.
-  - IP whitelisting is not available on any line sold today: every line connects with login
-    and password, and `capabilities.whitelist` is false. Integrations must feature-detect
-    that flag and hide any whitelist control while it is false; do not build a flow that
-    depends on `PUT /modems/{id}/set-white-list`.
-  - Usage: `?days=1-366` (default 30) returns `totals` and per-UTC-day rows of the current
-    rental only. `capabilities.usage` is false on every line today. A plan whose name ends
-    in ` - 20 GB/month only` includes 20 GB of mobile data per month; show usage only when
-    `capabilities.usage` is true.
+- Offer IP whitelisting only when the owned row advertises `proxyEndpoints.capabilities.whitelist: true` or `features.whitelist.available: true`. When both are absent or false, hide the control and use the line’s login and password. An eligible write replaces the whole list and accepts up to 10 addresses or permitted CIDR entries.
+  - Usage returns totals and UTC-day rows for the current rental. `days` runs from 1 to 366 (default 30). Show usage only with `capabilities.usage`. Display the optional `dataAllowanceNote.text` when provided. The declared `gbPerMonth` is informational and does not measure remaining data.
   - Speed test: `POST` (optional UUIDv4 `request_id`) answers `202`; poll `GET` for
     `down_mbps`, `up_mbps`, `latency_ms`. One test per 10 minutes per proxy (`429` with
     `Retry-After`).
-- Refused with `409 action_unsupported` and nothing changed: `set-rotation-interval`,
-  `replace`, `apply-settings`, `test`. `cancel` answers `409 cancel_unsupported`.
+- Refused with `409 action_unsupported` and nothing changed: `replace`, `apply-settings`, `test`. `cancel` answers `409 cancel_unsupported`.
 - OpenVPN (only when `capabilities.openvpn` is true) downloads once per profile; see
   [p0f and OpenVPN](p0f-and-openvpn.md#5-download-openvpn).
 - An expired rental stays on your account for 24 hours so you can renew it with the same

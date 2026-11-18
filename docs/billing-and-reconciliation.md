@@ -217,6 +217,10 @@ renewal take `total_usd` from `POST /payment/renewal-quote`; for a buy, the tota
 (tariff `price` x `modemCount`, less any coupon). The server compares it with the total it
 is about to charge, before any debit.
 
+A quote can also carry `warnings` with `modem_id`, `code` and `message`. Show the message
+with the price before the customer confirms. A `NODE_LINE_NOT_SERVING` warning means
+the proxy has been observed down for at least 24 hours. Renewal remains available.
+
 ```js
 const q = await renewalQuote({ modems: [{ modem_id, days: 30 }] });
 // ... the buyer approves q.total_usd ...
