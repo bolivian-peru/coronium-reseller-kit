@@ -110,6 +110,19 @@ async function main() {
         if (shapeOk) {
             const p0fRows = rows.filter((r) => r.p0f_count > 0);
             ok(`${rows.length} region rows; ${p0fRows.length} hold p0f units (p0f_count > 0)`);
+            // OpenAPI 3.3.16 adds openvpn_count, ipv6_count and one_time_only_count. Older
+            // servers omit them, so check each only when present.
+            const extra = ['openvpn_count', 'ipv6_count', 'one_time_only_count'];
+            const extraOk = rows.every((r) => extra.every((k) => r[k] === undefined
+                || (Number.isInteger(r[k]) && r[k] >= 0 && r[k] <= r.count)));
+            if (!extraOk) {
+                bad('a /free-modems row has an openvpn_count, ipv6_count or one_time_only_count that is not an integer between 0 and count');
+            } else if (rows.length && rows.every((r) => extra.every((k) => r[k] !== undefined))) {
+                const full = (k) => rows.filter((r) => r.count > 0 && r[k] === r.count).length;
+                ok(`feature counts present; regions where every unit has OpenVPN: ${full('openvpn_count')}, native IPv6: ${full('ipv6_count')}; regions with one-time units: ${rows.filter((r) => r.one_time_only_count > 0).length}`);
+            } else {
+                note('this server does not send openvpn_count / ipv6_count / one_time_only_count yet (OpenAPI 3.3.16)');
+            }
             // A complete buy body: a tariff on that carrier with p0f stock, plus the region.
             for (const r of p0fRows) {
                 const t = tariffs.body.data

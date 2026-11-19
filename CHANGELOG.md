@@ -4,6 +4,20 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.19 - feature counts per region (OpenAPI 3.3.16)
+
+Additive; no client change is needed. Every `GET /api/v3/free-modems` row gains
+`openvpn_count`, `ipv6_count` and `one_time_only_count` next to `count` and `p0f_count`
+(integers, always present, never more than `count`). `dataAllowanceNote` is unchanged.
+
+- New section [Guaranteeing features per region](docs/stock-and-credentials.md#guaranteeing-features-per-region):
+  OpenVPN or native IPv6 is guaranteed only on a buy with a `region_id` whose row has
+  `openvpn_count == count` or `ipv6_count == count`; an `autoRenew: true` order never
+  gets a one-time unit.
+- README, AGENTS.md, llms.txt, feature-badges and p0f-and-openvpn point to it.
+- `examples/verify-integration.mjs` checks the three counts when the server sends them.
+- `examples/nextjs-dashboard/lib/coronium.ts` types them on `StockRow` (optional for older servers).
+
 ## 2026.11.19 - owned Node line controls and renewal warnings
 
 The November 17 API release added the following fields and controls. Check the

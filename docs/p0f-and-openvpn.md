@@ -28,6 +28,12 @@ curl 'https://api.coronium.io/api/v3/free-modems?country_id=*'
 can get. It is counted with the same test the checkout uses, so a region showing
 `p0f_count > 0` is one the checkout can fill.
 
+Since OpenAPI 3.3.16 each row also has `openvpn_count`, `ipv6_count` and
+`one_time_only_count` next to `p0f_count` (integers, always present, never more than
+`count`). Unlike p0f, OpenVPN cannot be required on a buy: it is guaranteed only when
+you buy with a `region_id` whose row has `openvpn_count == count`. See
+[Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
+
 Per plan, from `/tariffs/available`:
 
 ```json
