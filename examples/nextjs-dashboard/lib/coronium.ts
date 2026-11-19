@@ -318,6 +318,18 @@ export interface StockRow {
     /** How many of `count` a buy with `require: ["p0f"]` and this region_id can get. */
     p0f_count: number;
     dataAllowanceNote?: StockAllowanceNote;
+    /**
+     * Since OpenAPI 3.3.16 (optional here for older servers). How many of `count` can
+     * serve OpenVPN. Guaranteed for a buy with this region_id only when equal to `count`.
+     */
+    openvpn_count?: number;
+    /** How many of `count` were last observed egressing on native IPv6. Guaranteed only when equal to `count`. */
+    ipv6_count?: number;
+    /**
+     * How many of `count` are one-time rentals (never sold with autoRenew: true). An
+     * autoRenew order can get at most `count - one_time_only_count` units from this row.
+     */
+    one_time_only_count?: number;
 }
 
 export interface BuyResult {

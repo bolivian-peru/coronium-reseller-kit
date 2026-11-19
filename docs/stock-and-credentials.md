@@ -135,9 +135,49 @@ If stock differs between your integration and the dashboard:
 6. For p0f, read each row's `p0f_count` (and `features.p0f.count` per plan). It is
    what a buy with `require: ["p0f"]` and that `region_id` can get. See
    [p0f and OpenVPN](p0f-and-openvpn.md).
+7. For OpenVPN, native IPv6 and one-time units, read the same row's `openvpn_count`,
+   `ipv6_count` and `one_time_only_count` (OpenAPI 3.3.16). See
+   [Guaranteeing features per region](#guaranteeing-features-per-region).
 
 The [interactive API reference](https://api.coronium.io/api-docs/) includes
 the header on stock and purchase operations. Run `examples/verify-integration.mjs`
 for a read-only check; it already sends the header. A successful stock read is not
 a reservation or proof of a paid purchase. Use an idempotency key per purchase
 intent and reconcile the payment response before retrying.
+
+## Guaranteeing features per region
+
+`GET /api/v3/free-modems` returns one row per country, carrier and region. Since OpenAPI 3.3.16 each row has, next to `count` and `p0f_count`:
+
+| Field | Meaning |
+|---|---|
+| `count` | Units you can buy in this row right now. |
+| `p0f_count` | Units with OS fingerprint (p0f) control. |
+| `openvpn_count` | Units that can serve OpenVPN. |
+| `ipv6_count` | Units whose last observed egress IP is native IPv6 (global unicast, 2000::/3). |
+| `one_time_only_count` | One-time rentals: never sold with auto-renew or a monthly subscription. Renew them by modem ID. |
+| `dataAllowanceNote` | Only on rows where some unit declares a monthly data allowance: `{gbPerMonth, text, count, all}`. `count` = units in the row that carry the note, `all` = every unit carries it. It is a note, not a limit. |
+
+All counts are integers and always present (0 when none). They come from the same stock list as `count`, so `count` is always at least each of them. On `/tariffs/available` the same facts are per plan across all regions of the carrier: for a one-time plan of the same `period`, the sum of a carrier's `openvpn_count` is `features.openvpn.count` and the sum of its `ipv6_count` is `ip_stack.ipv6`.
+
+What you can guarantee to your customer:
+
+| Feature | How to guarantee it |
+|---|---|
+| p0f | Buy with `require: ["p0f"]` (or `wantP0f: true`) and the row's `region_id`. This works on mixed rows. You get only p0f units, or a 409 and nothing is charged. |
+| OpenVPN | Only buy with a `region_id` whose row has `openvpn_count == count`. No buy flag selects OpenVPN units. |
+| Native IPv6 | Only buy with a `region_id` whose row has `ipv6_count == count`. No buy flag selects IPv6 units. This rests on each unit's last observed egress IP. |
+| Monthly or auto-renew | An order with `autoRenew: true` never gets a one-time unit. It can get at most `count - one_time_only_count` units from a row. When that is 0, it gets a 409 `auto_renew_unavailable` before any charge (subject to stock at order time). |
+| No one-time units | Order from a `region_id` whose row has `one_time_only_count == 0`. There is no safe buy flag for this. `autoRenew: true` also excludes them, but it enrols the line in auto-renewal, so do not use it only as a filter. |
+| Anything else | Not guaranteeable from stock (for example a specific IP, speed or ASN). |
+
+One-time units can still be renewed. Renew them by modem ID with `/payment/renew-modems-with-crypto-balance`, `/payment/renew-with-account-credit` or `/payment/renew-with-card/{card_id}`, for 1 to 90 days, while the line is on your account. Three conditions apply:
+- The device does not need to be online to renew. If the line has had no working connection for more than 24 hours, the renewal quote can carry a `NODE_LINE_NOT_SERVING` warning.
+- A line that has expired and is being reconciled answers 409 `node_renewal_reconciling`. Refresh its status and try again.
+- A replaced line is renewed through its replacement.
+
+Stock moves. Read `/free-modems` again right before checkout. The counts are not a reservation, and a unit can be sold between your read and your order.
+
+There is no per-unit stock list on the reseller API. The dashboard's per-unit feed (`/api/v1/modems/count/*`) is not part of the reseller API. Use `GET /api/v3/free-modems`.
+
+`region_id` is honoured by every buy route: card (`/payment/buy-with-card/{card_id}`), crypto balance (`/payment/buy-modems-with-crypto-balance`) and account credit (`/payment/buy-with-account-credit`), on `/api/v3` and on the client routes. A buy only gets units from that region.

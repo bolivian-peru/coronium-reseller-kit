@@ -46,7 +46,7 @@ ask me before any paid test purchase.
 | `docs/webhook-integration.md` | Auto-swap event flow contract |
 | `docs/feature-badges.md` | Show IPv6, OS fingerprint (p0f) and OpenVPN badges on plan cards, region pickers and customer lines, from live API fields |
 | `docs/p0f-and-openvpn.md` | Find p0f stock per region, buy with `require: ["p0f"]`, set the OS, replacements that keep p0f, OpenVPN download answers |
-| `docs/stock-and-credentials.md` | Optional credential header, line types, Coronium Node rows, capabilities |
+| `docs/stock-and-credentials.md` | Optional credential header, line types, Coronium Node rows, capabilities, [guaranteeing features per region](docs/stock-and-credentials.md#guaranteeing-features-per-region) |
 | `CHANGELOG.md` | Dated list of API and kit changes, breaking vs additive |
 | `docs/metadata-strategy.md` | Customer mapping via `metadata` plus a small local swap-recovery index |
 | `docs/pricing-markup.md` | 2026 market rates + economics |
@@ -59,7 +59,7 @@ ask me before any paid test purchase.
 | `GET /api/v3/account` | Account credit, BTC and USDT balances |
 | `GET /api/v3/account/proxies/health` | Per-proxy `health` (`state` `ok`, `degraded`, `down` or `unknown`, plus `checked_at` and `source`), `is_alive` and the older `recommendation`. Automate on `health.state` |
 | `GET /api/v3/tariffs/available` | In-stock tariffs, with `features.p0f.count` and `features.openvpn.count` per plan |
-| `GET /api/v3/free-modems` | Stock per country, carrier and region, with `p0f_count` per region |
+| `GET /api/v3/free-modems` | Stock per country, carrier and region, with `p0f_count` per region, plus `openvpn_count`, `ipv6_count` and `one_time_only_count` (OpenAPI 3.3.16). See [Guaranteeing features per region](docs/stock-and-credentials.md#guaranteeing-features-per-region) |
 | `POST /api/v3/payment/buy-modems-with-crypto-balance` | Buy proxies, attach `metadata.customer_id`, optional `require: ["p0f"]` |
 | `POST /api/v3/payment/buy-with-account-credit` | Buy using USD account credit, optional `require: ["p0f"]` |
 | `POST /api/v3/payment/renewal-quote` | Show the exact total and any advisory `warnings[].message` before approval |
@@ -117,6 +117,7 @@ Coupons, including any reseller discount on your account, apply on both the acco
 - Add `require: ["p0f"]` to any v3 buy body to get only units with p0f. No such unit: `409 p0f_unavailable`. Any other value: `400 unknown_requirement` with `supported: ["p0f"]`. Nothing is charged or reserved either way.
 - After purchase each line has `features.p0f.server_supported`, `supported_values`, `vocabulary` (`os_profile`, `tcp_stack` or null) and `unavailable_reason` (`mobile_network`, `line` or null). Set the OS with `PUT /modems/{id}/set-os`. `200` = applied: `data.applied: true`, or `data.noop: true` when the line already had that value. `202` with `data.pending: true` (plus `request_id` and `change`) = sent to the line and not yet confirmed: do not resend (a resend answers `409 p0f_change_in_progress`), read `p0f_os` on `GET /account/proxies` later. An optional `request_id` (UUIDv4) makes a retry safe. Refusals: `400 p0f_unsupported_on_server`, `400 p0f_os_unsupported_on_this_server` (with `allowed`), `429` (one change per 5 minutes), `502 p0f_not_applied` (nothing changed, retry in a minute), `404 p0f_unavailable` (OS changes are not available on this line right now - contact support). Some lines answer with these codes instead: `400 p0f_os_not_supported_on_server` (value not accepted, carries `allowed`), `429 p0f_rate_limited`, `409 p0f_change_in_progress`, `409 p0f_proxy_offline` (retry later), `409 rental_conflict`, `400 invalid_request` (bad `request_id`). Branch on the HTTP status first and treat both 400 "value not accepted" spellings the same way.
 - Replacing a p0f line gives a p0f line and re-applies the OS. With none available: `409 p0f_replacement_unavailable`, nothing changes; resend with `{"allow_without_p0f": true}` to accept a line without p0f.
+- Per region (OpenAPI 3.3.16): every `/free-modems` row also has `openvpn_count`, `ipv6_count` and `one_time_only_count` (integers, always present, never more than `count`). OpenVPN or native IPv6 is guaranteed only when you buy with a `region_id` whose row has `openvpn_count == count` or `ipv6_count == count`; no buy flag selects them. An order with `autoRenew: true` never gets a one-time unit. Full table: [Guaranteeing features per region](docs/stock-and-credentials.md#guaranteeing-features-per-region).
 - OpenVPN: check `features.openvpn.available` on the line. A line set up in the last 2 hours may answer `503 openvpn_profile_pending` with `Retry-After`: wait and retry the same line, never replace it. `409 openvpn_not_supported` and `400 openvpn_disabled` are final.
 
 Details and examples: [docs/p0f-and-openvpn.md](docs/p0f-and-openvpn.md).

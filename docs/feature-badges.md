@@ -10,6 +10,7 @@ There are two places a badge can appear, and they read different fields:
 |---|---|---|---|
 | Plan cards (before buying) | `GET /api/v3/tariffs/available` | none (public) | How many lines in stock for this plan have the feature right now |
 | Region picker (before buying) | `GET /api/v3/free-modems` | none (public) | p0f only: how many lines in this region a p0f buy can get |
+| Region picker, since OpenAPI 3.3.16 | `GET /api/v3/free-modems` | none (public) | Also `openvpn_count`, `ipv6_count` and `one_time_only_count`: how many lines in this region have OpenVPN, were last observed on native IPv6, or are one-time rentals |
 | Customer's own lines (after buying) | `GET /api/v3/account/proxies` | Bearer API key | Whether this exact line has the feature |
 
 ## 1. Plan cards: `GET /api/v3/tariffs/available`
@@ -62,6 +63,10 @@ What a buy can guarantee:
   get a line without them. Only show a plain "IPv6" or "OpenVPN" badge when every line
   has it (`native_ipv6: true`, `openvpn.all: true`); otherwise say how many ("on 3 of 16")
   so the customer is not promised something the checkout cannot select.
+- Since OpenAPI 3.3.16 you can guarantee IPv6 and OpenVPN per region instead: buy with
+  a `region_id` whose `/free-modems` row has `ipv6_count == count` or
+  `openvpn_count == count`. There is still no buy flag for them. See
+  [Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
 
 ## 2. Region picker: `GET /api/v3/free-modems`
 
@@ -73,6 +78,25 @@ What a buy can guarantee:
 Show an "OS fingerprint" badge on a region when `p0f_count > 0`, and send that `region_id`
 with `require: ["p0f"]`. This endpoint has no IPv6 or OpenVPN counts; use the plan row for
 those.
+
+Since OpenAPI 3.3.16 it does. Every row also carries `openvpn_count`, `ipv6_count` and
+`one_time_only_count` (integers, always present, never more than `count`):
+
+```json
+{ "country_id": "60436110...", "carrier_id": "61eff55b...", "region_id": "62251620...",
+  "count": 4, "p0f_count": 0, "openvpn_count": 4, "ipv6_count": 4, "one_time_only_count": 1 }
+```
+
+| Badge on a region | Show when | Suggested label |
+|---|---|---|
+| OpenVPN | `openvpn_count > 0` | `openvpn_count == count` -> "OpenVPN"; otherwise "OpenVPN on {openvpn_count} of {count}" |
+| IPv6 | `ipv6_count > 0` | `ipv6_count == count` -> "IPv6"; otherwise "IPv6 on {ipv6_count} of {count}" |
+| One-time rental | `one_time_only_count > 0` | "{one_time_only_count} of {count} one-time (no auto-renew)" |
+
+A plain "OpenVPN" or "IPv6" badge on a region is a promise the checkout keeps only when
+the buy sends that `region_id`. An order with `autoRenew: true` can get at most
+`count - one_time_only_count` units from the row. Full table:
+[Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
 
 ## 3. The customer's own lines: `GET /api/v3/account/proxies`
 
