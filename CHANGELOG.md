@@ -4,6 +4,13 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.24 - Stripe Link buyer instructions
+
+Added a separate prompt for a buyer paying for one eligible dedicated line with
+Stripe Link. The [MPP buyer guide](https://www.coronium.io/blog/buy-a-mobile-proxy-with-stripe-mpp)
+covers quoting, wallet approval and delivery status. The starter dashboard retains
+its existing purchase and renewal flows.
+
 ## 2026.11.19 - feature counts per region (OpenAPI 3.3.16)
 
 Additive; no client change is needed. Every `GET /api/v3/free-modems` row gains

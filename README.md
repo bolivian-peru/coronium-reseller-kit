@@ -14,7 +14,13 @@ If you're an AI agent scaffolding a reseller dashboard, **read these first** in 
 
 Read the [public OpenAPI specification](https://api.coronium.io/openapi.json) or browse it in [Swagger UI](https://api.coronium.io/api-docs/). The [changelog](./CHANGELOG.md) records the API behavior and examples checked for each kit update.
 
-Prefer MCP? [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp) runs the same API as tools: `npx -y coronium-proxy-mcp@2.4.3` locally, or the hosted servers `https://api.coronium.io/mcp` (22 tools, never spends) and `https://api.coronium.io/mcp/buyer` (15 tools, 20 when purchases are allowed). See [Accounts and funding without a browser](#accounts-and-funding-without-a-browser).
+Prefer MCP? [`coronium-proxy-mcp`](https://github.com/coroniumio/coronium-proxy-mcp) exposes stock, account and balance-purchase tools: `npx -y coronium-proxy-mcp@2.4.3` locally, or the hosted servers `https://api.coronium.io/mcp` (22 tools, never spends) and `https://api.coronium.io/mcp/buyer` (15 tools, 20 when purchases are allowed). See [Accounts and funding without a browser](#accounts-and-funding-without-a-browser).
+
+### Buy one rental with a Stripe Link wallet
+
+If the buyer chooses their Link wallet, request a quote for one eligible dedicated rental with `POST /api/v3/payment/mpp`. The buyer’s Coronium API key identifies the account. An eligible first request returns an HTTP 402 challenge with the USD price. Show the merchant, tariff, term and exact price before asking the wallet for approval.
+
+For the payment retry, keep the same account, request body bytes, credential preference and `Idempotency-Key`. Keep the account Bearer in `Authorization` and send the wallet credential in `Payment-Authorization`. A pending response may already represent a payment in progress. Use the returned `status_url` on the Coronium API origin to confirm delivery before handing over credentials. [Stripe MPP buyer guide](https://www.coronium.io/blog/buy-a-mobile-proxy-with-stripe-mpp)
 
 ## For humans
 
@@ -191,7 +197,7 @@ Offer IP whitelisting only when the owned row advertises `proxyEndpoints.capabil
 
 ### 1. The `metadata` field is your customer-mapping layer
 
-Stamp `metadata.customer_id` on every purchase. Keep the purchase receipt and a durable local order/payment/modem-to-customer mapping too. Replacements keep metadata, but older lines can have missing values and the old modem may be gone before your webhook worker runs. Missing metadata alone is not evidence of failed delivery or a reason to buy again.
+Stamp `metadata.customer_id` on each reseller dashboard purchase. Keep the purchase receipt and a durable local order/payment/modem-to-customer mapping too. Replacements keep metadata, but older lines can have missing values and the old modem may be gone before your webhook worker runs. Missing metadata alone is not evidence of failed delivery or a reason to buy again.
 
 ```json
 POST /api/v3/payment/buy-modems-with-crypto-balance
@@ -251,7 +257,7 @@ Treat active proxies as customer-owned service. Check current ownership and capa
 2. **Use a public HTTPS webhook URL.** HTTP returns 400, and so does any private or non-resolving host. Redirects are not followed.
 3. **Persist the signed webhook durably before acknowledging it within 5 seconds.** Non-2xx is retried; dedupe on `event_id` and process from a durable inbox.
 4. **Verify `X-Coronium-Signature`** over the raw request bytes before trusting a payload.
-5. **Idempotency**: pass an `Idempotency-Key` header on any `/payment/*` POST - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice. A real `POST /account/balance/convert` move requires one in the same format.
+5. **Idempotency**: pass an `Idempotency-Key` header on the starter dashboard’s purchase and renewal requests - `[A-Za-z0-9_-]{8,128}`, 24h window, replays answer with `X-Idempotency-Replay: true`. One key per buy *intent*, reused across retries; a key that changes per attempt buys twice. A real `POST /account/balance/convert` move requires one in the same format.
 6. **Classic rotation is synchronous and answers 200 on failure.** Branch on `rotated`, not on the status code. Rows with `proxyEndpoints` answer 202 (poll rotation-status). A refusal is 409, 429 (wait `Retry-After`) or 502 `rotation_unconfirmed` (poll rotation-status, do not resend); read `code` and `suggested_action`.
 7. Use seconds for `rotation_interval`. Zero disables a timer. For a Node line, use the bounds returned in `proxyEndpoints.rotationSchedule` (120–86400 in steps of 60) when `capabilities.rotationInterval` is true. A stored schedule can still be turned off. Other timed rows with `proxyEndpoints` accept 60–2592000 in steps of 60. Classic rows accept 60 or more.
 8. **Don't reinvent auto-swap or health logic.** Both are server-side, battle-tested.
