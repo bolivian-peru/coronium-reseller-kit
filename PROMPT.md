@@ -43,6 +43,17 @@ show the quote and any warnings before renewing an owned modem, and display sepa
 separately. Store customer mappings durably. No dashboard is required.
 ```
 
+**For a buyer paying with Stripe Link**:
+
+```
+Read https://www.coronium.io/blog/buy-a-mobile-proxy-with-stripe-mpp.
+Find an eligible dedicated rental matching my request. Use my Coronium API
+key from the secret store to obtain a priced MPP challenge. Show me the
+merchant, plan, term and exact USD price. Wait for my approval before asking
+Link to pay. Keep the original order key and follow that order to delivery.
+If checkout is unavailable, stop and tell me what the API returned.
+```
+
 **For a Telegram-bot reseller**:
 
 ```
@@ -92,10 +103,8 @@ order or replay an old payment merely because metadata is absent.
 
 ## How funding works today
 
-The API spends money that is already on your Coronium account, or a card you saved
-in the dashboard. It cannot send anything from your own wallet, and an agent must
-never send funds on-chain. You put the money in; the API can then move your own
-crypto into account credit:
+The reseller examples below use a Coronium balance or a card saved in the
+dashboard. Keep on-chain deposits under the account owner’s control.
 
 - **Account credit (USD).** Add it in the dashboard at <https://dashboard.coronium.io>.
   Buys spend it through `POST /payment/buy-with-account-credit`.
@@ -118,7 +127,7 @@ per IP address and per email domain, so create an account only when a person ask
 After that, use only the API key: it needs no two-factor code and is not ended by a
 password change.
 
-Refunds always go back to your Coronium balance. Keep "never send funds on-chain" and
+Refunds for the balance-funded purchases described here go back to your Coronium balance. Keep "never send funds on-chain" and
 "ask me before any purchase or conversion" in every prompt you give an agent. To check
 everything end to end, buy one line on the 24-hour plan.
 
