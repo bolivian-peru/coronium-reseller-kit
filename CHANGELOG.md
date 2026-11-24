@@ -4,6 +4,12 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## Unreleased - account with no details (held until the route answers in production)
+
+Additive. Create an account with no details: `POST https://api.coronium.io/api/v3/agents/accounts` with an optional `label` and `email`. The answer carries an API key once; use it as `Authorization: Bearer`. Until the first payment the account can read the catalog and itself, get a USDT or BTC deposit address, move a confirmed deposit into credit and buy with it. Cards, CoinGate, coupons and email alerts open after an email is confirmed (`POST /api/v3/agents/accounts/email`). Setting a password on such an account stops its API key; make a new one in Account, API Access. Without an email a lost key cannot be recovered. Rotate with `POST /api/v1/account/api-token/rotate`.
+The answer is `201` with `apiToken` shown once and `state: "unfunded"`; `503 agent_signup_off` while
+it is switched off; `429` past the limits; `403 agent_account_unfunded` before the first payment.
+
 ## 2026.11.25 - Stripe MPP checkout details, key rotation, agent prompts
 
 Docs only; no example behaviour changed. Checked against OpenAPI 3.3.16 (live), the

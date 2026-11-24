@@ -102,8 +102,16 @@ Auth: `Authorization: Bearer <jwt>` header. Use the account API key from <https:
 
 An agent can open the account, fund it and buy with no dashboard visit. The account starts empty: no balance, no proxies, nothing included until paid. Every purchase still needs the person's yes for the exact total.
 
+Create an account with no details: `POST https://api.coronium.io/api/v3/agents/accounts` with an optional `label` and `email`. The answer carries an API key once; use it as `Authorization: Bearer`. Until the first payment the account can read the catalog and itself, get a USDT or BTC deposit address, move a confirmed deposit into credit and buy with it. Cards, CoinGate, coupons and email alerts open after an email is confirmed (`POST /api/v3/agents/accounts/email`). Setting a password on such an account stops its API key; make a new one in Account, API Access. Without an email a lost key cannot be recovered. Rotate with `POST /api/v1/account/api-token/rotate`.
+
+```bash
+curl -s -X POST https://api.coronium.io/api/v3/agents/accounts \
+  -H 'Content-Type: application/json' -d '{"label": "reseller-bot"}'
+```
+
 | Method · Path | Purpose |
 |---|---|
+| `POST /api/v3/agents/accounts` | No details needed: `{label?, email?}` (only those two fields). `201` with `apiToken` shown once, `accountId`, `state: "unfunded"` and the allowed routes in `untilFunded`. `503 agent_signup_off` while it is switched off; `429` `agent_signup_limit_address`, `agent_signup_limit_network` or `agent_signup_busy` with `Retry-After`; before the first payment other routes answer `403 agent_account_unfunded` |
 | `POST /api/v3/signup` | `{login, password, name, purpose?}`. Disposable and reserved email domains (including `.test`, `.example`, `.invalid`, `.localhost`) are refused. At most 5 accounts per IP address a day and 5 per uncommon email domain an hour (`429` with `Retry-After`). `name` at most 80 characters, `purpose` 500; no `<` or `>` in `name`. A verification email is sent; nothing waits for it |
 | `POST /api/v3/get-token` | `{login, password}` (plus `code` on a two-factor account) → a session token, used once to fetch the API key below |
 | `GET https://api.coronium.io/api/v1/account/api-token` | With the session token as Bearer: `{token, expiresAt}`, the 365-day API key (the same key as Dashboard → Account → API Access) |
