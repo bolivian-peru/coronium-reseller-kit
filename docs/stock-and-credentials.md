@@ -61,7 +61,7 @@ what to show from `capabilities`, not from the label.
 
 - For an owned Node line advertising `proxyEndpoints.capabilities.autoRenew`, read `GET /modems/{id}/auto-renewal?days=30` and show the offer. With explicit approval send `PUT /modems/{id}/auto-renewal` with `{mode:"balance", autoRenewConsent:true, days:offer.days, expected_price_usd:offer.price_usd}`. Disable with `{mode:"off"}`. A one-time checkout does not enrol the line. A missing offer gives no price to approve. If the price changes, show the new price and ask again. A 404 on this route means it is unavailable for this line.
 - Show any `warnings[].message` from the renewal quote before the customer confirms. `NODE_LINE_NOT_SERVING` means the line has been observed down for at least 24 hours. The customer can still renew.
-- Use seconds for `rotation_interval`. Zero disables a timer. For a Node line, use the bounds returned in `proxyEndpoints.rotationSchedule` (120–86400 in steps of 60) when `capabilities.rotationInterval` is true. A stored schedule can still be turned off. Other timed rows with `proxyEndpoints` accept 60–2592000 in steps of 60. Classic rows accept 60 or more.
+- Use seconds for `rotation_interval`. Zero disables a timer. For a Node line, use the bounds returned in `proxyEndpoints.rotationSchedule` (120 to 86400 in steps of 60) when `capabilities.rotationInterval` is true. A stored schedule can still be turned off. Other timed rows with `proxyEndpoints` accept 60 to 2592000 in steps of 60. Classic rows accept 60 or more.
 - One login and password on both ports (`credentials: "shared-protocol-v1"`). `proxy_login`
   is fixed (`cnr_<modem id>`); `PUT /modems/{id}/change-password` takes 8-128 printable
   ASCII characters without spaces.

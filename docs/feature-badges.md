@@ -1,8 +1,8 @@
 # Feature badges: IPv6, OS fingerprint (p0f) and OpenVPN
 
 How to show "IPv6", "OS fingerprint" and "OpenVPN" badges in your own storefront and
-customer panel, from fields the API already returns. Checked against the live API on
-13 Nov 2026 (OpenAPI 3.3.12): the fields below are unchanged. Full reference: <https://api.coronium.io/api-docs/>.
+customer panel, from fields the API already returns. Checked against OpenAPI 3.3.16
+(live 24 Nov 2026). Full reference: <https://api.coronium.io/api-docs/>.
 
 There are two places a badge can appear, and they read different fields:
 

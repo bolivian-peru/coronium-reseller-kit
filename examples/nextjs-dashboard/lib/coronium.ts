@@ -562,8 +562,8 @@ export const coronium = {
         /**
          * Send seconds. Zero turns a stored timer off. On a Node rental, check
          * capabilities.rotationInterval before setting a timer and use the
-         * rotationSchedule bounds (120–86400 in steps of 60). Other timed rows
-         * with proxyEndpoints take 60–2592000 in steps of 60. Classic minimum: 60.
+         * rotationSchedule bounds (120 to 86400 in steps of 60). Other timed rows
+         * with proxyEndpoints take 60 to 2592000 in steps of 60. Classic minimum: 60.
          */
         setRotationInterval: (id: string, seconds: number) =>
             call<{ result: string; applied?: boolean; data: { _id: string; name?: string; rotation_interval: number } }>(

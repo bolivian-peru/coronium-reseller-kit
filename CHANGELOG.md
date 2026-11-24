@@ -4,6 +4,25 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.25 - Stripe MPP checkout details, key rotation, agent prompts
+
+Docs only; no example behaviour changed. Checked against OpenAPI 3.3.16 (live), the
+live MPP checkout and Link CLI 1.6.0.
+
+- Stripe MPP: only some dedicated plans qualify and the catalog does not mark them. An
+  ineligible plan answers `409 spt_stock_unavailable`, and the first request charges
+  nothing. Terms are daily, weekly or monthly, and p0f is not offered. Send
+  `Content-Type: application/json` (anything else answers `415`). Delivered means
+  `status: completed` with the line in `modems`. The buyer's wallet is
+  `@stripe/link-cli@1.6.0` (US and Canadian Link accounts for now). Its `mpp pay`
+  output repeats the request headers. The shared payment token route is named.
+  `POST /payment/mpp` is listed in the OpenAPI from 3.3.17.
+- API key rotation by API: `POST /api/v1/account/api-token/rotate` with the current API
+  key or a login token as Bearer.
+- Links to the copyable agent setup prompts at https://dashboard.coronium.io/en/agents.
+- Copy: long dashes in the rotation-interval ranges are now "120 to 86400" and "60 to
+  2592000". The p0f and feature-badge page headers name OpenAPI 3.3.16.
+
 ## 2026.11.24 - Stripe Link buyer instructions
 
 Added a separate prompt for a buyer paying for one eligible dedicated line with
