@@ -13,7 +13,7 @@ it is switched off; `429` past the limits; `403 agent_account_unfunded` before t
 ## 2026.11.25 - Stripe MPP checkout details, key rotation, agent prompts
 
 Docs only; no example behaviour changed. Checked against OpenAPI 3.3.16 (live), the
-live MPP checkout and Link CLI 1.6.0.
+deployed MPP checkout code (no live purchase observed) and Link CLI 1.6.0.
 
 - Stripe MPP: only some dedicated plans qualify and the catalog does not mark them. An
   ineligible plan answers `409 spt_stock_unavailable`, and the first request charges
