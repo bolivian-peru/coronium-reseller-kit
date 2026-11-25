@@ -1,5 +1,7 @@
 # Paste this into Claude Code (or Cursor, Windsurf, Aider)
 
+Copyable agent setup prompts for a single account (API key, MCP, SDK, REST, Stripe MPP) are at https://dashboard.coronium.io/en/agents. The prompts below build a reseller integration.
+
 ```
 Read the AGENTS.md at https://raw.githubusercontent.com/bolivian-peru/coronium-reseller-kit/main/AGENTS.md
 and use https://github.com/bolivian-peru/coronium-reseller-kit/tree/main/examples/nextjs-dashboard
@@ -46,12 +48,20 @@ separately. Store customer mappings durably. No dashboard is required.
 **For a buyer paying with Stripe Link**:
 
 ```
-Read https://www.coronium.io/blog/buy-a-mobile-proxy-with-stripe-mpp.
-Find an eligible dedicated rental matching my request. Use my Coronium API
-key from the secret store to obtain a priced MPP challenge. Show me the
-merchant, plan, term and exact USD price. Wait for my approval before asking
-Link to pay. Keep the original order key and follow that order to delivery.
-If checkout is unavailable, stop and tell me what the API returned.
+Read https://www.coronium.io/blog/buy-a-mobile-proxy-with-stripe-mpp and
+https://www.coronium.io/.well-known/agent-skills/coronium-mpp-checkout/SKILL.md.
+Install the wallet tool with npm install -g @stripe/link-cli@1.6.0, then let me
+finish link-cli auth login (US and Canadian Link accounts only for now).
+Find a dedicated daily, weekly or monthly rental matching my request. Use my
+Coronium API key from the secret store and Content-Type: application/json to
+obtain a priced MPP challenge from POST /api/v3/payment/mpp. A 409
+spt_stock_unavailable means that plan is not sold this way and nothing was
+charged: pick another. Show me the merchant, plan, term and exact USD price.
+Wait for my approval before asking Link to pay, and send me only the
+approval_url from link-cli mpp pay (its output repeats the request headers).
+Keep the original order key and body bytes and follow that order until its
+status_url shows status completed with the line in modems. If checkout is
+unavailable, stop and tell me what the API returned.
 ```
 
 **For a Telegram-bot reseller**:
