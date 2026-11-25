@@ -158,10 +158,11 @@ Do not loop: the same request gets the same answer until the checks change.
 Any other `require` value, or a `require` that is not a list of strings, is
 `400 unknown_requirement` with `supported: ["p0f", "ipv6"]`, also before any charge.
 
-### Stripe Link (MPP) checkout
+### Stripe Link (MPP) and shared payment token checkouts
 
-The Stripe Link (MPP) checkout accepts `require: ["ipv6"]` but answers `409 ipv6_unavailable`
-before any quote or charge: the lines it sells have no IPv6 check. Buy IPv6 lines on the
+The Stripe Link (MPP) checkout (`POST /payment/mpp`) and the shared payment token checkout
+(`POST /payment/buy-with-shared-payment-token`) accept `require: ["ipv6"]` but answer
+`409 ipv6_unavailable` before any quote or charge: the lines they sell have no IPv6 check. Buy IPv6 lines on the
 account-credit, BTC or saved-card route.
 
 ## Replacing an IPv6 line

@@ -159,7 +159,7 @@ export function planBadges(p: Plan): string[] {
   const out: string[] = [];
   const of = (n: number) => `on ${n} of ${p.stock}`;
   const v6 = p.ip_stack?.ipv6 ?? 0;
-  if (v6 > 0) out.push(p.ip_stack?.native_ipv6 ? 'IPv6' : `IPv6 ${of(v6)}`);
+  if (v6 > 0) out.push(p.ip_stack?.native_ipv6 ? 'IPv6 native' : `IPv6 native ${of(v6)}`);
   const f = p.features;
   if (f && f.p0f.count > 0) out.push(f.p0f.all ? 'OS fingerprint' : `OS fingerprint ${of(f.p0f.count)}`);
   if (f && f.openvpn.count > 0) out.push(f.openvpn.all ? 'OpenVPN' : `OpenVPN ${of(f.openvpn.count)}`);

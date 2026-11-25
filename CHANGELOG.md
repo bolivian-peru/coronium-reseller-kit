@@ -22,8 +22,8 @@ change that adds it. Publish this entry only once 3.3.18 is live.
 - Replacement: a line bought with `require: ["ipv6"]` gets only a checked IPv6 line, or
   `409 ipv6_replacement_unavailable` with nothing changed (`allow_without_ipv6: true`
   accepts one without). The automatic swap then sends `modem.dead` with `no_ipv6_stock`.
-- The Stripe Link (MPP) checkout answers `409 ipv6_unavailable` to `require: ["ipv6"]`
-  before any quote or charge.
+- The Stripe Link (MPP) and shared payment token checkouts answer `409 ipv6_unavailable`
+  to `require: ["ipv6"]` before any quote or charge.
 - New guide [Picking IPv6 lines](docs/ipv6-lines.md) with request and response examples
   and the exact guarantee. Removed the statements that no buy flag selects IPv6 lines.
 
