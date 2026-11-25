@@ -10,13 +10,13 @@ There are two places a badge can appear, and they read different fields:
 |---|---|---|---|
 | Plan cards (before buying) | `GET /api/v3/tariffs/available` | none (public) | How many lines in stock for this plan have the feature right now |
 | Region picker (before buying) | `GET /api/v3/free-modems` | none (public) | p0f only: how many lines in this region a p0f buy can get |
-| Region picker, since OpenAPI 3.3.16 | `GET /api/v3/free-modems` | none (public) | Also `openvpn_count`, `ipv6_count`, `p0f_ipv6_count` (3.3.18) and `one_time_only_count`: how many lines in this region have OpenVPN, had native IPv6 checked through their own port in the last 2 hours (alone, or with p0f), or are one-time rentals |
+| Region picker, since OpenAPI 3.3.16 | `GET /api/v3/free-modems` | none (public) | Also `openvpn_count`, `ipv6_count` and `one_time_only_count`: how many lines in this region have OpenVPN, IPv6 ([IPv6 lines](ipv6-lines.md)), or are one-time rentals |
 | Customer's own lines (after buying) | `GET /api/v3/account/proxies` | Bearer API key | Whether this exact line has the feature |
 
 ## 1. Plan cards: `GET /api/v3/tariffs/available`
 
 One row per plan (country, carrier, term). A plan can hold mixed stock: some lines with
-p0f or IPv6 and some without. Live example of such a row on 13 Nov 2026 (stock and counts
+p0f and some without. Live example of such a row on 13 Nov 2026 (stock and counts
 change all the time; read them, never hard-code them):
 
 ```json
@@ -30,28 +30,19 @@ change all the time; read them, never hard-code them):
   "features": {
     "p0f":     { "count": 17, "all": false },
     "openvpn": { "count": 35, "all": true },
-    "ipv6_native": false,
-    "ipv6":    { "count": 17, "all": false }
+    "ipv6_native": false
   }
 }
 ```
 
-(`features.ipv6` is added by OpenAPI 3.3.18 and is not in the 13 Nov sample; it is shown
-here with the same number as `ip_stack.ipv6`, which it always equals.)
-
-For this row the badges are "IPv6 native on 17 of 35", "OS fingerprint on 17 of 35" and
-"OpenVPN". A buy with `require: ["p0f"]` gets one of the 17 p0f lines, a buy with
-`require: ["ipv6"]` one of the 17 IPv6 lines, and a buy without either can get any kind.
+For this row the badges are "OS fingerprint on 17 of 35" and "OpenVPN". A buy with
+`require: ["p0f"]` gets one of the 17 p0f lines, and a buy without it can get any kind.
+Badge IPv6 per region from `ipv6_count` (section 2).
 
 | Badge | Field | Show when | Suggested label |
 |---|---|---|---|
-| IPv6 | `ip_stack.ipv6` = `features.ipv6.count` (lines whose native IPv6 was checked through their own proxy port in the last 2 hours: what `require: ["ipv6"]` can buy), `ip_stack.native_ipv6` = `features.ipv6.all` (true = every line) | `ip_stack.ipv6 > 0` | `native_ipv6: true` -> "IPv6 native"; otherwise "IPv6 native on {ipv6} of {stock}" |
 | OS fingerprint (p0f) | `features.p0f.count`, `features.p0f.all` | `count > 0` | `all: true` -> "OS fingerprint"; otherwise "OS fingerprint on {count} of {stock}" |
 | OpenVPN | `features.openvpn.count`, `features.openvpn.all` | `count > 0` | `all: true` -> "OpenVPN"; otherwise "OpenVPN on {count} of {stock}" |
-
-`features.ipv6_native` and `features.ipv6.all` are the same flag as `ip_stack.native_ipv6`;
-read any of them. Until 25 Nov 2026 `ip_stack.ipv6` counted the last address seen on each
-line, which overstated; it now counts only checked lines.
 
 Both tariff and regional stock rows may also carry `dataAllowanceNote`. Its
 `gbPerMonth` and `text` describe the lowest declared monthly allowance among
@@ -65,11 +56,8 @@ What a buy can guarantee:
   refuses before charging (409 `p0f_unavailable`). See
   [p0f-and-openvpn.md](p0f-and-openvpn.md). So a "with OS fingerprint" option on your
   checkout must add `require: ["p0f"]`.
-- **IPv6** can be required since OpenAPI 3.3.18. Send `"require": ["ipv6"]` (or
-  `["p0f", "ipv6"]` for both on one line) and the checkout gives only lines with a fresh
-  IPv6 check or refuses before charging (409 `ipv6_unavailable`). An "I need IPv6" option on
-  your checkout must add it. See [Picking IPv6 lines](ipv6-lines.md) for what the check
-  does and does not guarantee after a rotation or restart.
+- **IPv6** can be required: an "I need IPv6" option must add `"require": ["ipv6"]`. See
+  [IPv6 lines](ipv6-lines.md).
 - **OpenVPN cannot be required.** When `openvpn.all` is false, a buy may get a line
   without it. Only show a plain "OpenVPN" badge when every line has it; otherwise say how
   many ("on 3 of 16") so the customer is not promised something the checkout cannot select.
@@ -85,12 +73,10 @@ What a buy can guarantee:
 ```
 
 Show an "OS fingerprint" badge on a region when `p0f_count > 0`, and send that `region_id`
-with `require: ["p0f"]`. This endpoint has no IPv6 or OpenVPN counts; use the plan row for
-those.
+with `require: ["p0f"]`.
 
-Since OpenAPI 3.3.16 it does. Every row also carries `openvpn_count`, `ipv6_count` and
-`one_time_only_count`, and since 3.3.18 `p0f_ipv6_count` (integers, always present, never
-more than `count`):
+Since OpenAPI 3.3.16 every row also carries `openvpn_count`, `ipv6_count` and
+`one_time_only_count` (integers, always present, never more than `count`):
 
 ```json
 { "country_id": "60436110...", "carrier_id": "61eff55b...", "region_id": "62251620...",
@@ -101,12 +87,12 @@ more than `count`):
 | Badge on a region | Show when | Suggested label |
 |---|---|---|
 | OpenVPN | `openvpn_count > 0` | `openvpn_count == count` -> "OpenVPN"; otherwise "OpenVPN on {openvpn_count} of {count}" |
-| IPv6 | `ipv6_count > 0` | `ipv6_count == count` -> "IPv6 native"; otherwise "IPv6 native on {ipv6_count} of {count}" |
 | One-time rental | `one_time_only_count > 0` | "{one_time_only_count} of {count} one-time (no auto-renew)" |
 
+**IPv6 badge:** base it on `ipv6_count`, and show a plain "IPv6" badge only when it equals `count` (otherwise "IPv6 on {ipv6_count} of {count}"); see [IPv6 lines](ipv6-lines.md).
+
 A plain "OpenVPN" badge on a region is a promise the checkout keeps only when the buy
-sends that `region_id`. An IPv6 badge is a promise only when the buy also sends
-`require: ["ipv6"]` (with `p0f_ipv6_count` covering the order when it sends p0f too). An order with `autoRenew: true` can get at most
+sends that `region_id`. An order with `autoRenew: true` can get at most
 `count - one_time_only_count` units from the row. Full table:
 [Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
 
@@ -125,7 +111,7 @@ Each line carries:
 
 | Badge | Field | Show when |
 |---|---|---|
-| IPv6 | `features.native_ipv6` | `true` (the last address recorded for the line is a global IPv6 address; this is not the purchase check, see [Picking IPv6 lines](ipv6-lines.md#the-ipv6-native-badge)) |
+| IPv6 | `features.native_ipv6` | `true` (the last address seen, not the purchase check; see [IPv6 lines](ipv6-lines.md)) |
 | OS fingerprint | `features.p0f.server_supported` | `true`; show `current_os` as the active value, empty = off |
 | OpenVPN | `features.openvpn.available` | `true`; link the download to your own backend, which calls `GET /api/v3/modems/{modem_id}/openvpn` |
 
@@ -141,9 +127,8 @@ server-side. The OpenVPN answers to handle (503 `openvpn_profile_pending` with
 - Read the counts every time instead of keeping a "this country has p0f" flag. A line can
   leave the p0f count when it stops passing the check, and some carriers never pass it.
 - A replacement keeps p0f (or refuses with 409 `p0f_replacement_unavailable`), so a line's
-  OS fingerprint badge stays true after `modem.replaced`. A line bought with
-  `require: ["ipv6"]` is replaced only by a line with a fresh IPv6 check (or 409
-  `ipv6_replacement_unavailable`). Re-read the line to refresh IPv6 and OpenVPN.
+  OS fingerprint badge stays true after `modem.replaced`. An IPv6 line keeps IPv6 the same
+  way ([IPv6 lines](ipv6-lines.md)). Re-read the line to refresh IPv6 and OpenVPN.
 - Never show our carrier or supplier names beyond what the plan row gives you.
 
 ## Minimal code
@@ -151,19 +136,23 @@ server-side. The OpenVPN answers to handle (503 `openvpn_profile_pending` with
 ```ts
 type Plan = {
   stock: number;
-  ip_stack?: { ipv4: number; ipv6: number; native_ipv6: boolean };
-  features?: { p0f: { count: number; all: boolean }; openvpn: { count: number; all: boolean }; ipv6_native: boolean };
+  features?: { p0f: { count: number; all: boolean }; openvpn: { count: number; all: boolean } };
 };
 
 export function planBadges(p: Plan): string[] {
   const out: string[] = [];
   const of = (n: number) => `on ${n} of ${p.stock}`;
-  const v6 = p.ip_stack?.ipv6 ?? 0;
-  if (v6 > 0) out.push(p.ip_stack?.native_ipv6 ? 'IPv6 native' : `IPv6 native ${of(v6)}`);
   const f = p.features;
   if (f && f.p0f.count > 0) out.push(f.p0f.all ? 'OS fingerprint' : `OS fingerprint ${of(f.p0f.count)}`);
   if (f && f.openvpn.count > 0) out.push(f.openvpn.all ? 'OpenVPN' : `OpenVPN ${of(f.openvpn.count)}`);
   return out;
+}
+
+type Region = { count: number; ipv6_count: number };
+
+export function regionIpv6Badge(r: Region): string | null {
+  if (r.ipv6_count <= 0) return null;
+  return r.ipv6_count === r.count ? 'IPv6' : `IPv6 on ${r.ipv6_count} of ${r.count}`;
 }
 
 type Line = { features?: { p0f?: { server_supported: boolean; current_os: string };

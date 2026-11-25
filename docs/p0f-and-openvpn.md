@@ -30,9 +30,7 @@ can get. It is counted with the same test the checkout uses, so a region showing
 
 Since OpenAPI 3.3.16 each row also has `openvpn_count`, `ipv6_count` and
 `one_time_only_count` next to `p0f_count` (integers, always present, never more than
-`count`), and since 3.3.18 `p0f_ipv6_count` (units with both p0f and a fresh IPv6
-check: what `require: ["p0f", "ipv6"]` can buy). Native IPv6 can be required like p0f:
-see [Picking IPv6 lines](ipv6-lines.md). OpenVPN cannot be required on a buy: it is
+`count`). IPv6 can be required like p0f: see [IPv6 lines](ipv6-lines.md). OpenVPN cannot be required on a buy: it is
 guaranteed only when you buy with a `region_id` whose row has `openvpn_count == count`. See
 [Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
 

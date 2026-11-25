@@ -4,6 +4,11 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.25 (docs) - simpler IPv6 guide
+
+IPv6 docs simplified to three steps; no API change. [IPv6 lines](docs/ipv6-lines.md) is
+the one guide; the other pages link to it. New code only needs `ipv6_count`.
+
 ## 2026.11.25 (later) - native IPv6 as a buy requirement (OpenAPI 3.3.18)
 
 Docs only; no example behaviour changed. Checked against OpenAPI 3.3.18 and the backend
