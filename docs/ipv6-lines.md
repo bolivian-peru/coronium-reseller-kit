@@ -35,6 +35,10 @@ confirmation; there is no separate IPv6 field.
 - `"require": ["p0f", "ipv6"]` needs both on the same unit; its count is `p0f_ipv6_count`.
 - `{"allow_without_ipv6": true}` on replace accepts a line without IPv6. Ask the buyer first.
 
+**Good to know:**
+- A rotation or restart gives the line a new address. Whether it has IPv6 again is up to the carrier.
+- The Stripe Link (MPP) checkout does not take `require: ["ipv6"]` yet (409); use account credit, crypto balance or card.
+
 **Older names, kept for compatibility:** `native_ipv6`, `features.ipv6`, `ip_stack.ipv6` and
 `features.ipv6.all` on unit rows say the same thing as `ipv6_count`. New code only needs `ipv6_count`.
 `features.native_ipv6` on an owned line is the last address seen, not the purchase check.
