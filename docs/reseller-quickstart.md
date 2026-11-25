@@ -122,7 +122,7 @@ It is `modemCount`. `metadata` accepts an object or a string; objects are JSON-s
 
 You get back `{result, charged_usd, currency, data:[{_id, http_port, socks_port, proxy_login, proxy_password, ext_ip, …}], billing}`. `data[0]` is your customer's proxy; `billing` itemizes what you were charged.
 
-If stock ran out between listing and buying, the balance lanes return `409` with `code: "no_stock"` (`reason_code: "OUT_OF_STOCK"`) and nothing is charged; ask the buyer to choose another available product. With `require: ["p0f"]` the refusal is `409 p0f_unavailable`, and with `require: ["ipv6"]` (alone or with p0f) it is `409 ipv6_unavailable`; see [Picking IPv6 lines](ipv6-lines.md).
+If stock ran out between listing and buying, the balance lanes return `409` with `code: "no_stock"` (`reason_code: "OUT_OF_STOCK"`) and nothing is charged; ask the buyer to choose another available product. With `require: ["p0f"]` the refusal is `409 p0f_unavailable`, and with `require: ["ipv6"]` it is `409 ipv6_unavailable` ([IPv6 lines](ipv6-lines.md)).
 
 ## 6. Set up the customer-facing side
 

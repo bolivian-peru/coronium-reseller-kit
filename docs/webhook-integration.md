@@ -126,7 +126,7 @@ Dedupe on `event_id` and on a repeat `new_modem_id`, and refetch the line from `
 |---|---|
 | `no_stock` | No available proxy from the same supply in that country |
 | `no_p0f_stock` | The proxy has OS fingerprint (p0f) and no p0f proxy is available. Replace it yourself with `{"allow_without_p0f": true}` once your buyer agrees |
-| `no_ipv6_stock` | The proxy was bought with `require: ["ipv6"]` and no proxy with a fresh IPv6 check is available. Replace it yourself with `{"allow_without_ipv6": true}` once your buyer agrees. See [Picking IPv6 lines](ipv6-lines.md) |
+| `no_ipv6_stock` | IPv6 line, no IPv6 replacement free. See [IPv6 lines](ipv6-lines.md) |
 | `pipeline_failed` | Provisioning failed; the old proxy is kept |
 | `provider_unsupported` | This line type cannot be replaced automatically; contact support |
 | `shared_modem`, `tariff_orphan`, `no_owner`, `modem_not_found`, `config_error` | Not replaced; contact support if it persists |
