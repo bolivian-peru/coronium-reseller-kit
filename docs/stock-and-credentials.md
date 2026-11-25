@@ -136,8 +136,11 @@ If stock differs between your integration and the dashboard:
    what a buy with `require: ["p0f"]` and that `region_id` can get. See
    [p0f and OpenVPN](p0f-and-openvpn.md).
 7. For OpenVPN, native IPv6 and one-time units, read the same row's `openvpn_count`,
-   `ipv6_count` and `one_time_only_count` (OpenAPI 3.3.16). See
-   [Guaranteeing features per region](#guaranteeing-features-per-region).
+   `ipv6_count` and `one_time_only_count` (OpenAPI 3.3.16), and `p0f_ipv6_count` for
+   both p0f and IPv6 (3.3.18). `ipv6_count` is what a buy with `require: ["ipv6"]` and
+   that `region_id` can get. See
+   [Guaranteeing features per region](#guaranteeing-features-per-region) and
+   [Picking IPv6 lines](ipv6-lines.md).
 
 The [interactive API reference](https://api.coronium.io/api-docs/) includes
 the header on stock and purchase operations. Run `examples/verify-integration.mjs`
@@ -154,7 +157,8 @@ intent and reconcile the payment response before retrying.
 | `count` | Units you can buy in this row right now. |
 | `p0f_count` | Units with OS fingerprint (p0f) control. |
 | `openvpn_count` | Units that can serve OpenVPN. |
-| `ipv6_count` | Units whose last observed egress IP is native IPv6 (global unicast, 2000::/3). |
+| `ipv6_count` | Units whose native IPv6 was checked through their own proxy port in the last 2 hours (they reached IPv6-only sites): what `require: ["ipv6"]` can buy. Until 25 Nov 2026 this counted the last address seen on the line, which overstated. |
+| `p0f_ipv6_count` | Units with both p0f and that IPv6 check: what `require: ["p0f", "ipv6"]` can buy. |
 | `one_time_only_count` | One-time rentals: never sold with auto-renew or a monthly subscription. Renew them by modem ID. |
 | `dataAllowanceNote` | Only on rows where some unit declares a monthly data allowance: `{gbPerMonth, text, count, all}`. `count` = units in the row that carry the note, `all` = every unit carries it. It is a note, not a limit. |
 
@@ -166,10 +170,12 @@ What you can guarantee to your customer:
 |---|---|
 | p0f | Buy with `require: ["p0f"]` (or `wantP0f: true`) and the row's `region_id`. This works on mixed rows. You get only p0f units, or a 409 and nothing is charged. |
 | OpenVPN | Only buy with a `region_id` whose row has `openvpn_count == count`. No buy flag selects OpenVPN units. |
-| Native IPv6 | Only buy with a `region_id` whose row has `ipv6_count == count`. No buy flag selects IPv6 units. This rests on each unit's last observed egress IP. |
+| Native IPv6 | Buy with `require: ["ipv6"]` (or `["p0f", "ipv6"]`) and the row's `region_id`. This works on mixed rows. You get only lines with a fresh IPv6 check, or a 409 and nothing is charged. See below for what holds after rotation or restart. |
 | Monthly or auto-renew | An order with `autoRenew: true` never gets a one-time unit. It can get at most `count - one_time_only_count` units from a row. When that is 0, it gets a 409 `auto_renew_unavailable` before any charge (subject to stock at order time). |
 | No one-time units | Order from a `region_id` whose row has `one_time_only_count == 0`. There is no safe buy flag for this. `autoRenew: true` also excludes them, but it enrols the line in auto-renewal, so do not use it only as a filter. |
 | Anything else | Not guaranteeable from stock (for example a specific IP, speed or ASN). |
+
+**Native IPv6, exactly.** Native IPv6 means the line reaches IPv6-only sites over its own mobile IPv6 address. What we guarantee: every line sold with `require: ["ipv6"]` passed that check through its own proxy port within the last 2 hours, and is checked again just before it is handed over when that check is more than 10 minutes old. What we cannot guarantee: the mobile carrier assigns the IPv6 address per session, so a rotation, restart or reconnect gives the line a new address, and whether it gets IPv6 again is the carrier's decision, not ours; we do not re-check sold lines on a schedule. Sites that offer both IPv4 and IPv6 may still be reached over IPv4. We have not verified OS fingerprint (p0f) control on IPv6 connections. Replacement honours the requirement: `/replace` on a line bought with `require: ["ipv6"]` gives a line with a fresh IPv6 check, or answers `409 ipv6_replacement_unavailable` and changes nothing. A paid order whose free lines all fail that final check waits as a delayed order until a line passes it; it is never filled with a line without IPv6. Steps and examples: [Picking IPv6 lines](ipv6-lines.md).
 
 One-time units can still be renewed. Renew them by modem ID with `/payment/renew-modems-with-crypto-balance`, `/payment/renew-with-account-credit` or `/payment/renew-with-card/{card_id}`, for 1 to 90 days, while the line is on your account. Three conditions apply:
 - The device does not need to be online to renew. If the line has had no working connection for more than 24 hours, the renewal quote can carry a `NODE_LINE_NOT_SERVING` warning.

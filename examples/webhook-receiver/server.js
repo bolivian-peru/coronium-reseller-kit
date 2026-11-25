@@ -167,6 +167,9 @@ async function processEvent(body) {
             //   - no_stock             : geo is exhausted right now
             //   - no_p0f_stock         : p0f line, no p0f replacement. Ask the buyer
             //                            before replacing with { allow_without_p0f: true }
+            //   - no_ipv6_stock        : bought with require ["ipv6"], no line with a fresh
+            //                            IPv6 check. Ask the buyer before replacing with
+            //                            { allow_without_ipv6: true }
             //   - pipeline_failed      : provisioning failed - file a ticket with data.old_modem_id
             //   - provider_unsupported : this line type is not replaced automatically - ticket
             //   - shared_modem, tariff_orphan, no_owner, modem_not_found,

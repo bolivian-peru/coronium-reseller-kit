@@ -30,8 +30,10 @@ can get. It is counted with the same test the checkout uses, so a region showing
 
 Since OpenAPI 3.3.16 each row also has `openvpn_count`, `ipv6_count` and
 `one_time_only_count` next to `p0f_count` (integers, always present, never more than
-`count`). Unlike p0f, OpenVPN cannot be required on a buy: it is guaranteed only when
-you buy with a `region_id` whose row has `openvpn_count == count`. See
+`count`), and since 3.3.18 `p0f_ipv6_count` (units with both p0f and a fresh IPv6
+check: what `require: ["p0f", "ipv6"]` can buy). Native IPv6 can be required like p0f:
+see [Picking IPv6 lines](ipv6-lines.md). OpenVPN cannot be required on a buy: it is
+guaranteed only when you buy with a `region_id` whose row has `openvpn_count == count`. See
 [Guaranteeing features per region](stock-and-credentials.md#guaranteeing-features-per-region).
 
 Per plan, from `/tariffs/available`:
@@ -89,15 +91,15 @@ HTTP 409
 
 ```json
 HTTP 400
-{ "error": "Unknown purchase requirement. \"require\" must be a list of: p0f. Nothing was charged.",
+{ "error": "Unknown purchase requirement. \"require\" must be a list of: p0f, ipv6. Nothing was charged.",
   "code": "unknown_requirement",
-  "supported": ["p0f"], "suggested_action": "use_supported_requirements",
+  "supported": ["p0f", "ipv6"], "suggested_action": "use_supported_requirements",
   "retryable": false, "request_id": "req_..." }
 ```
 
 - `p0f_unavailable`: choose a region or plan whose count is above zero, or try later.
   Do not loop: the same request gets the same answer until stock changes.
-- `unknown_requirement`: `require` must be a list holding only `"p0f"`. Any other
+- `unknown_requirement`: `require` must be a list whose values are `"p0f"` or `"ipv6"`. Any other
   value, or a non-list, is refused so a typo never buys a unit without the feature.
 
 ## 3. Set the OS on a line

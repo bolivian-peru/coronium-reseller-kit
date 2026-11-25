@@ -105,7 +105,7 @@ then processes the inbox: map data.old_modem_id -> data.new_modem_id on my Strip
 customer (store the modem _id, never the proxy password), refetch the line from
 GET /account/proxies for the current connection details and metadata, notify my
 customer through my own channel, and handle modem.dead reasons including
-no_p0f_stock. Replacements keep metadata. If it is missing, verify the receipt
+no_p0f_stock and no_ipv6_stock. Replacements keep metadata. If it is missing, verify the receipt
 and current ownership before any set-metadata repair; preserve all intended
 keys, stop on conflicting values, and read back the result. Never place a new
 order or replay an old payment merely because metadata is absent.
