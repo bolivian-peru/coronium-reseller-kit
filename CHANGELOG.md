@@ -4,6 +4,29 @@ Each entry names the Coronium API version (OpenAPI at <https://api.coronium.io/a
 the kit was checked against. "Breaking" means an answer you may already handle changed;
 "Additive" needs no client change.
 
+## 2026.11.25 (later) - native IPv6 as a buy requirement (OpenAPI 3.3.18)
+
+Docs only; no example behaviour changed. Checked against OpenAPI 3.3.18 and the backend
+change that adds it. Publish this entry only once 3.3.18 is live.
+
+- Additive: `require: ["ipv6"]` (or `["p0f", "ipv6"]`) on all three v3 buy routes and the
+  client buy routes. Too few lines with a fresh IPv6 check: `409 ipv6_unavailable` before
+  any charge, also when p0f was required too. `unknown_requirement` now lists
+  `supported: ["p0f", "ipv6"]`.
+- Breaking for anyone who relied on the old meaning: `ipv6_count` on `/free-modems` and
+  `ip_stack.ipv6` on `/tariffs/available` now count only lines whose native IPv6 was
+  checked through their own proxy port in the last 2 hours. They used to count the last
+  address seen, which overstated, so the numbers can drop.
+- Additive: `p0f_ipv6_count` on each `/free-modems` row and `features.ipv6 {count, all}` on
+  each `/tariffs/available` plan.
+- Replacement: a line bought with `require: ["ipv6"]` gets only a checked IPv6 line, or
+  `409 ipv6_replacement_unavailable` with nothing changed (`allow_without_ipv6: true`
+  accepts one without). The automatic swap then sends `modem.dead` with `no_ipv6_stock`.
+- The Stripe Link (MPP) and shared payment token checkouts answer `409 ipv6_unavailable`
+  to `require: ["ipv6"]` before any quote or charge.
+- New guide [Picking IPv6 lines](docs/ipv6-lines.md) with request and response examples
+  and the exact guarantee. Removed the statements that no buy flag selects IPv6 lines.
+
 ## 2026.11.25 - Stripe MPP checkout details, key rotation, agent prompts
 
 Docs only; no example behaviour changed. Checked against OpenAPI 3.3.16 (live), the

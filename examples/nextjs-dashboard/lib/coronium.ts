@@ -323,7 +323,11 @@ export interface StockRow {
      * serve OpenVPN. Guaranteed for a buy with this region_id only when equal to `count`.
      */
     openvpn_count?: number;
-    /** How many of `count` were last observed egressing on native IPv6. Guaranteed only when equal to `count`. */
+    /**
+     * How many of `count` had native IPv6 checked through their own proxy port in the
+     * last 2 hours: what a buy with `require: ["ipv6"]` and this region_id can get
+     * (OpenAPI 3.3.18; earlier servers counted the last address seen). See docs/ipv6-lines.md.
+     */
     ipv6_count?: number;
     /**
      * How many of `count` are one-time rentals (never sold with autoRenew: true). An
@@ -468,6 +472,9 @@ export const coronium = {
          * A p0f line is replaced only by a p0f line; with none available this
          * throws 409 `p0f_replacement_unavailable` and nothing changes. Pass
          * `allow_without_p0f: true` only after your buyer agreed to lose p0f.
+         * A line bought with require ["ipv6"] is replaced only by a line with a fresh
+         * IPv6 check, else 409 `ipv6_replacement_unavailable` and nothing changes. This
+         * sample does not send `allow_without_ipv6`; see docs/ipv6-lines.md.
          * Key on `newModemId`; ignore newModem.IMEI / portId (deprecated). A
          * `moved: true` answer kept the same id: refetch the line for its ports.
          *
@@ -606,9 +613,11 @@ export const coronium = {
                 /** Pin the region. Pick one whose /free-modems row has stock (or p0f_count when requiring p0f). */
                 region_id?: string;
                 /**
-                 * Features every proxy in the order must have. Only `p0f` exists today.
-                 * No qualifying unit: 409 `p0f_unavailable`, nothing charged or reserved.
-                 * Any other value: 400 `unknown_requirement` (`supported: ["p0f"]`).
+                 * Features every proxy in the order must have. This sample sends only `p0f`;
+                 * the API also accepts `ipv6` since OpenAPI 3.3.18 (docs/ipv6-lines.md).
+                 * No qualifying unit: 409 `p0f_unavailable` (`ipv6_unavailable` with ipv6),
+                 * nothing charged or reserved.
+                 * Any other value: 400 `unknown_requirement` (`supported: ["p0f", "ipv6"]`).
                  */
                 require?: Array<'p0f'>;
                 /**
